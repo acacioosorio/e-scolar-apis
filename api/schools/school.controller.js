@@ -15,68 +15,9 @@ const { sendValidateEmail } = require('../../helpers/emails');
 /**
  * Configure Nodemailer
  */
-const nodemailer = require('nodemailer');
-
-const transporter = nodemailer.createTransport({
-	host: "smtp.kinghost.net",
-	port: 465,
-	secure: true,
-	auth: {
-		user: "admin@escolar.site",
-		pass: "Ac410s0#789852",
-	},
-	// auth: {
-	// 	user: "noreply@escolar.site",
-	// 	pass: "eSc789@4A58B4#123!4s",
-	// },
-});
 
 exports.index = async (req, res, next) => {
 	res.send("Schools API")
-
-	const info = await transporter.sendMail({
-		from: '"E-scolar" <admin@escolar.site>',
-		to: 'acaciodoug+03@gmail.com',
-		subject: "Sua conta foi criada no E-scolar 🤝",
-		text: `Olá Fulano, como vai? Uma conta foi criada para você na instituição Chupetinha. Para ativar a sua conta e configurar a sua senha, acesso o link https://escolar.site/validate-account?AASDASDASD. Em caso de dúvidas, não deixe de entrar em contato, blablablabla...`,
-		html: `
-		<!DOCTYPE html>
-		<html>
-
-			<head>
-				<title>Complete Your Registration</title>
-			</head>
-
-			<body style="padding:20px">
-				<div class="card" style="background-clip:border-box; background-color:#fff; border:0 solid #dfe3e7; border-radius:0.267rem; display:flex; flex-direction:column; min-width:0; position:relative; word-wrap:break-word" bgcolor="#ffffff">
-					<div class="card-header" style="border:none; padding-bottom:22.4px; padding-left:27.2px; padding-right:27.2px; padding-top:22.4px">
-						<h4 style="font-size:1.2rem; margin:0">Final Step to Activate Your Account</h4>
-					</div>
-					<div class="card-body" style="flex:1 1 auto; padding:1rem">
-						<p>Dear Churros,</p>
-						<p>Thank you for signing up with us! You're just one step away from activating your account.</p>
-						<p>To complete your registration, please set up your password. This will ensure your account is secure and
-							ready to use.</p>
-						<a href="http://localhost:3000/auth/validate-account?hash=AASASDASDASDASDASD&email=ASDASD@asedasd.com" class="btn btn-primary" style="margin: 16px 0; -moz-user-select:none; -ms-user-select:none; -webkit-user-select:none; background-color:#5a8dee; border:1px solid transparent; border-radius:0.267rem; color:#fff; cursor:pointer; display:inline-block; font-size:0.855rem; font-weight:400; line-height:1.5; padding:0.467rem 1.5rem; text-align:center; text-decoration:none; transition:color 0.15s ease-in-out, background-color 0.15s ease-in-out, border-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out; user-select:none; vertical-align:middle; border-color:#5a8dee" bgcolor="#5a8dee" align="center" valign="middle">Set Your
-							Password</a>
-						<p>Once your password is set, your account will be fully activated, and you'll gain full access to all our
-							features and services.</p>
-						<p>If you have any questions or need assistance, feel free to reach out to our support team.</p>
-						<p>Thank you for choosing us!</p>
-						<p>Best regards,<br>Chupetinha</p>
-					</div>
-				</div>
-			</body>
-
-		</html>
-		`,
-	}, function (error, info) {
-		if (error) {
-			console.log(error);
-		}
-		console.log(info);
-	});
-
 };
 
 /**
