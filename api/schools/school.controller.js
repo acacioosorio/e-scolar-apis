@@ -405,3 +405,63 @@ exports.getGlobalSchoolStats = async (req, res) => {
 		});
 	}
 };
+
+/**
+ * Updates the status of an employee
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ */
+exports.updateEmployeeStatus = async (req, res) => {
+	console.log("updateEmployeeStatus body", req.body);
+	console.log("updateEmployeeStatus params", req.params);
+
+	try {
+
+		const { id } = req.params;
+		const { status } = req.body;
+		const schoolId = req.user?.school;
+
+		if (typeof status !== 'boolean') {
+			return res.status(400).json({
+				success: false,
+				message: 'Status must be a boolean value (true/false)'
+			});
+		}
+
+		// Find the user and check if they belong to the school
+		const user = await Users.findOne({ _id: id, school: schoolId });
+		if (!user) {
+			return res.status(404).json({
+				success: false,
+				message: 'User not found or does not belong to this school'
+			});
+		}
+
+		// Update user status
+		user.active = status;
+		await user.save();
+
+		// Notify connected clients about the status change via socket
+		const SchoolSocketService = require('./school.socket');
+		const { Server } = require('socket.io');
+		const io = req.app.get('io');
+		if (io) {
+			await SchoolSocketService.notifyUserStatusChange(io, schoolId, id, status);
+		}
+
+		res.json({
+			success: true,
+			data: {
+				message: status ? 'Collaborator successfully activated' : 'Collaborator successfully deactivated'
+			}
+		});
+
+	} catch (error) {
+		logger.error('Error updating user status:', error);
+		res.status(500).json({
+			success: false,
+			message: 'Error updating user status',
+			error: error.message
+		});
+	}
+};

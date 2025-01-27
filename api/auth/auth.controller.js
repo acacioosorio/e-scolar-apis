@@ -95,21 +95,24 @@ exports.backofficeSignin = async (req, res, next) => {
 	}
 }
 
-exports.schoolSignin = async (req, res, next) => {
+exports.schoolSignin = async (req, res) => {
 	const { email, password } = req.body;
 
 	try {
 		const user = await Users.findOne({ 'email': email }).populate('school');
+
 		if (!user) return res.status(404).json({ message: 'User not found' });
 		
-		if (user.role !== 'school') {
+		if (user.role !== 'school')
 			return res.status(403).json({ message: 'Unauthorized access. This endpoint is for school users only.' });
-		}
+
+		if (!user.active)
+			return res.status(403).json({ message: 'Your account is inactive. Please contact your administrator.' });
 
 		const isMatch = await bcrypt.compare(password, user.password);
-		if (!isMatch) {
+		
+		if (!isMatch)
 			return res.status(400).json({ message: 'Password incorrect' });
-		}
 
 		const payload = { 
 			id: user.id, 
@@ -154,7 +157,7 @@ exports.schoolSignin = async (req, res, next) => {
 			});
 		});
 
-	} catch(error) {
+	} catch (error) {
 		logger.error('School signin error:', error);
 		res.status(500).json({ message: 'Internal server error during login' });
 	}

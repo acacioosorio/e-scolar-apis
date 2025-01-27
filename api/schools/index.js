@@ -33,6 +33,7 @@ router.get('/stats', passport.authenticate('jwt-user', { session: false }), auth
 // router.get('/list', passport.authenticate(['jwt-user', 'jwt-employee'], { session: false }), authorizeRoles('backoffice'), authorizeSubRoles('staff'), controller.listSchools);
 router.get('/employees', passport.authenticate('jwt-user', { session: false }), authorizeRoles('backoffice', 'school'), authorizeSubRoles('admin', 'staff'), controller.listEmployees);
 router.post('/employees', passport.authenticate('jwt-user', { session: false }), authorizeRoles('backoffice', 'school'), authorizeSubRoles('admin', 'staff'), controller.addEmployee);
+router.patch('/employees/:id/status', passport.authenticate('jwt-user', { session: false }), authorizeRoles('backoffice', 'school'), authorizeSubRoles('admin', 'staff'), controller.updateEmployeeStatus);
 
 /**
  * Segments, Year Levels and stuff
