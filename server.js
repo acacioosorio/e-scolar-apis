@@ -45,13 +45,18 @@ require('./routes')(app);
 // Socket.IO
 // Socket.IO authentication middleware
 io.use((socket, next) => {
+
+	if (!socket.handshake.auth || !socket.handshake.auth.token || socket.handshake.auth.token === 'Bearer null')
+		return next(new Error('Token não fornecido!'));
+
 	const token = socket.handshake.auth.token.replace("Bearer ", "");
-	if (!token) return next(new Error('Token não fornecido!'));
+	if (!token || token === 'null')
+		return next(new Error('Token não fornecido!'));
 
 	jwt.verify(token, process.env.JWT_SECRET || 'minha_chave_secreta', (err, decoded) => {
 		if (err) {
-			console.log(err);
-			next(new Error('Token inválido!'));
+			console.log("jwt.verify", err);
+			return next(new Error('Token inválido!'));
 		}
 		socket.user = decoded;
 		next();
