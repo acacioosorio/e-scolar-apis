@@ -4,14 +4,22 @@ const mongoose = require('mongoose');
 const passport = require('passport');
 const cors = require('cors');
 const session = require('express-session');
+const jwt = require('jsonwebtoken');
+const { createServer } = require('http')
+const { Server } = require('socket.io')
 
-const http = require('http');
-const socketio = require('socket.io');
-const app = express();
+const app = express()
+const server = createServer(app)
 
-const server = http.createServer(app);
-const io = socketio(server);
+const io = new Server(server, {
+	serveClient: true,  // Enable serving the client file
+	cors: {
+		origin: '*'
+	}
+})
+
 const { logger } = require('./helpers/index');
+const { colorConsole } = require('tracer');
 
 // MongoDB Connection
 require('./config/mongoose')(mongoose);
@@ -35,14 +43,64 @@ require('./auth/passport')(passport);
 require('./routes')(app);
 
 // Socket.IO
+// Socket.IO authentication middleware
+io.use((socket, next) => {
+	const token = socket.handshake.auth.token.replace("Bearer ", "");
+	if (!token) return next(new Error('Token não fornecido!'));
+
+	jwt.verify(token, process.env.JWT_SECRET || 'minha_chave_secreta', (err, decoded) => {
+		if (err) {
+			console.log(err);
+			next(new Error('Token inválido!'));
+		}
+		socket.user = decoded;
+		next();
+	});
+});
+
+const activeConnections = new Map();
+
 io.on('connection', (socket) => {
-	console.log('An user connected');
+	const userId = socket.user.id;
+	const schoolId = socket.user.school;
+
+	if (schoolId) {
+		socket.join(`school:${schoolId}`);
+
+		console.log(`socket.join('school:${schoolId}');`)
+		console.log("====================================================")
+		// Store connection info
+		if (!activeConnections.has(schoolId)) {
+			activeConnections.set(schoolId, new Set());
+		}
+		activeConnections.get(schoolId).add(userId);
+
+		// Notify school room about new connection
+		io.to(`school:${schoolId}`).emit('user:connected', {
+			userId,
+			activeUsers: Array.from(activeConnections.get(schoolId))
+		});
+	}
 
 	socket.on('disconnect', () => {
-		console.log('User disconnected');
+		if (schoolId) {
+			const schoolConnections = activeConnections.get(schoolId);
+			if (schoolConnections) {
+				schoolConnections.delete(userId);
+				if (schoolConnections.size === 0) {
+					activeConnections.delete(schoolId);
+				}
+			}
+
+			// Notify school room about disconnection
+			io.to(`school:${schoolId}`).emit('user:disconnected', {
+				userId,
+				activeUsers: Array.from(activeConnections.get(schoolId) || [])
+			});
+		}
 	});
 });
 
 // Run application
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => logger.info(`Server running on port ${PORT}`));
+server.listen(PORT, () => logger.info(`Server running on port ${PORT}`));

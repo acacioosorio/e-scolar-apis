@@ -116,12 +116,16 @@ exports.schoolSignin = async (req, res, next) => {
 			name: user.firstName,
 			photo: user.photo,
 			role: user.role, 
-			subRole: user.subRole
+			subRole: user.subRole,
+			school: user.school._id
 		};
+
+		console.warn(user.school.CNPJ);
 
 		// Keep only essential school data
 		const schoolData = {
 			name: user.school.name,
+			CNPJ: user.school.CNPJ,
 			slug: user.school.slug,
 			email: user.school.email,
 			logo: user.school.logo,

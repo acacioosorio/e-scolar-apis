@@ -14,8 +14,8 @@ const UsersSchema = new Schema({
 	},
 	email: {
 		type: String,
-		unique: [true, 'Please add another e-mail'],
-		required: [true, 'Please add an E-mail'],
+		unique: [true, "Email already in use"],
+		required: [true, "Please add an Email"],
 	},
 	photo: String,
 	location: {
@@ -31,18 +31,24 @@ const UsersSchema = new Schema({
 	contact: {
 		phone: String,
 		cellPhone: String,
-		otherPhone: String
+		otherPhone: String,
 	},
 	documents: {
 		rg: {
 			type: String,
-			unique: true,
 			required: [true, 'Please add a RG Number'],
+			index: {
+				unique: true,
+				partialFilterExpression: { role: 'parent' }
+			}
 		},
 		cpf: {
 			type: String,
-			unique: true,
 			required: [true, 'Please add a CPF Number'],
+			index: {
+				unique: true,
+				partialFilterExpression: { role: 'parent' }
+			}
 		}
 	},
 	school: {
@@ -52,8 +58,6 @@ const UsersSchema = new Schema({
 			return this.role === 'school';
 		}
 	},
-	// students: [{ type: Schema.Types.ObjectId, ref: 'Student' }], // Uncomment after creating Student model
-	// messages: [{ type: Schema.Types.ObjectId, ref: 'Message' }], // Uncomment after creating Message model
 	role: {
 		type: String,
 		enum: ['parent', 'school', 'backoffice'],
@@ -61,7 +65,7 @@ const UsersSchema = new Schema({
 	},
 	subRole: {
 		type: String,
-		enum: ['admin', 'staff', 'concierge'],
+		enum: ['admin', 'staff', 'teacher', 'concierge'],
 		required: function () {
 			return this.role === 'school';
 		},

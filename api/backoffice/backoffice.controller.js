@@ -6,6 +6,8 @@ const { logger, saveFileToS3, deleteFileFromS3 } = require('../../helpers');
 const School = require('../schools/school.model');
 const Users = require('../users/users.model');
 const { sendValidateEmail } = require('../../helpers/emails');
+// const WebhookService = require('../../webhooks/webhook.service');
+
 
 exports.index = async (req, res, next) => {
 	res.json({ message: 'Bem-vindo ao painel do BackOffice!' });
@@ -290,6 +292,12 @@ exports.changeSchoolStatus = async (req, res, next) => {
 				? 'School successfully activated and validated staff have been activated'
 				: 'School successfully deactivated and all staff were deactivated'
 		}
+	});
+
+	await WebhookService.dispatchEvent(id, 'school.status_changed', {
+		schoolId: id,
+		status: status,
+		timestamp: new Date().toISOString()
 	});
 }
 
@@ -649,7 +657,7 @@ exports.updateUser = async (req, res) => {
 			return res.status(404).json({ error: 'Usuário não encontrado.' });
 
 		// Ensure the user being updated belongs to the same school as the admin
-		if (userToUpdate.school?.toString() !== requestingUser.school?.toString() && req.user.role != 'backoffice' )
+		if (userToUpdate.school?.toString() !== requestingUser.school?.toString() && req.user.role != 'backoffice')
 			return res.status(403).json({ error: 'Sem permissão para atualizar usuários de outras escolas.' });
 
 		// Validate email if it's being changed
@@ -662,14 +670,14 @@ exports.updateUser = async (req, res) => {
 		// Validate documents if they're being changed
 		if (documents) {
 			if (documents.rg && documents.rg !== userToUpdate.documents?.rg) {
-				const existingRG = await User.findOne({ 
+				const existingRG = await User.findOne({
 					'documents.rg': documents.rg,
 					_id: { $ne: id }
 				});
 				if (existingRG) return res.status(400).json({ error: 'RG já está cadastrado.' });
 			}
 			if (documents.cpf && documents.cpf !== userToUpdate.documents?.cpf) {
-				const existingCPF = await User.findOne({ 
+				const existingCPF = await User.findOne({
 					'documents.cpf': documents.cpf,
 					_id: { $ne: id }
 				});

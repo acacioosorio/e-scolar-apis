@@ -22,8 +22,6 @@ exports.verifyToken = (req, res, next) => {
 exports.authorizeRoles = (...allowedRoles) => {
 	return async (req, res, next) => {
 		try {
-			logger.log(req.user);
-			logger.log(allowedRoles);
 			const userRole = req.user.role;
 			const hasPermission = allowedRoles.includes(userRole);
 

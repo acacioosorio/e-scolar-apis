@@ -45,55 +45,47 @@ const SchoolSchema = new Schema({
 	name: {
 		type: String,
 		trim: true,
-		unique: false,
-		required: [true, 'Please add a Student Name'],
+		required: [true, "Please add a School Name"],
 	},
-	slug: {
-		type: String,
-	},
+	slug: String,
 	CNPJ: {
-        type: String,
-        trim: true,
-        unique: [true, 'CNPJ already Exists'],
-        required: [true, 'Please add a CNPJ'],
-        maxlength: 2000,
-    },
+		type: String,
+		trim: true,
+		unique: [true, "CNPJ already Exists"],
+		required: [true, "Please add a CNPJ"],
+		maxlength: 2000,
+	},
 	email: {
 		type: String,
 		trim: true,
-		required: [true, 'Please add a Email'],
+		required: [true, "Please add an Email"],
 	},
 	telephone: {
 		type: String,
 		trim: true,
-		required: [true, 'Please add an Phone Number'],
-		unique: false,
+		required: [true, "Please add a Phone Number"],
 		match: [
-			// /^\d{2}\.?\d{3}\.?\d{3}/?\d{4}-?\d{2}$/,
 			/^(?:(?:\+|00)?(55)\s?)?(?:\(?([1-9][0-9])\)?\s?)(?:((?:9\d|[2-9])\d{3})\-?(\d{4}))$/,
-			'Please add a valid Phone Number'
-		]
+			"Please add a valid Phone Number",
+		],
 	},
-	employees: [{ type: Schema.Types.ObjectId, ref: 'Users' }],
-	students: [{ type: Schema.Types.ObjectId, ref: 'Student' }],
-	responsiblesWaiting: [{ type: Schema.Types.ObjectId, ref: 'Users' }], // Uncomment after creating Parents Logic
-	responsiblesApproved: [{ type: Schema.Types.ObjectId, ref: 'Users' }], // Uncomment after creating Parents Logic
+	employees: [{ type: Schema.Types.ObjectId, ref: "Users" }],
+	responsiblesWaiting: [{ type: Schema.Types.ObjectId, ref: "Users" }],
+	responsiblesApproved: [{ type: Schema.Types.ObjectId, ref: "Users" }],
 	location: {
 		address: String,
 		number: String,
 		complement: String,
 		cep: String,
-		neighborhood: { type: String, text: true },
-		city: { type: String, text: true },
-		state: { type: String, text: true },
+		neighborhood: String,
+		city: String,
+		state: String,
 		latLng: String,
 	},
 	active: Boolean,
 	apiKey: String,
 	logo: String,
 	facade: String,
-	// segments: [{ type: Schema.Types.ObjectId, ref: 'Segments' }], // Uncomment after creating Segments model and Logic
-	// courses: [{ type: Schema.Types.ObjectId, ref: 'Courses' }], // Uncomment after creating Courses model and Logic
 }, { timestamps: true });
 
 module.exports = mongoose.models.School || mongoose.model('School', SchoolSchema);
