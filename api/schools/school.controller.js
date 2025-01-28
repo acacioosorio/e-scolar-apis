@@ -406,3 +406,53 @@ exports.updateEmployeeStatus = async (req, res) => {
 		});
 	}
 };
+
+/**
+ * Updates an employee's information
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ */
+exports.updateEmployee = async (req, res) => {
+	try {
+		const { id } = req.params;
+		const updates = req.body;
+		const schoolId = req.user?.school;
+
+		// Fields that cannot be updated
+		const restrictedFields = ['password', 'role', 'school', 'validateHash', 'active'];
+		restrictedFields.forEach(field => delete updates[field]);
+
+		// Find the user and check if they belong to the school
+		const user = await Users.findOne({ _id: id, school: schoolId });
+		if (!user) {
+			return res.status(404).json({
+				success: false,
+				message: 'User not found or does not belong to this school'
+			});
+		}
+
+		// Update user information
+		const updatedUser = await Users.findByIdAndUpdate(
+			id,
+			{ $set: updates },
+			{ 
+				new: true,
+				select: '-password -validateHash' // Exclude sensitive fields from response
+			}
+		);
+
+		res.json({
+			success: true,
+			message: 'Employee updated successfully',
+			data: updatedUser
+		});
+
+	} catch (error) {
+		logger.error('Error updating employee:', error);
+		res.status(500).json({
+			success: false,
+			message: 'Error updating employee',
+			error: error.message
+		});
+	}
+};
