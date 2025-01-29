@@ -414,16 +414,17 @@ exports.updateEmployeeStatus = async (req, res) => {
  */
 exports.updateEmployee = async (req, res) => {
 	try {
-		const { id } = req.params;
 		const updates = req.body;
 		const schoolId = req.user?.school;
+
+		console.log("updateEmployee body", req.body);
 
 		// Fields that cannot be updated
 		const restrictedFields = ['password', 'role', 'school', 'validateHash', 'active'];
 		restrictedFields.forEach(field => delete updates[field]);
 
 		// Find the user and check if they belong to the school
-		const user = await Users.findOne({ _id: id, school: schoolId });
+		const user = await Users.findOne({ _id: updates._id, school: schoolId });
 		if (!user) {
 			return res.status(404).json({
 				success: false,
@@ -433,11 +434,11 @@ exports.updateEmployee = async (req, res) => {
 
 		// Update user information
 		const updatedUser = await Users.findByIdAndUpdate(
-			id,
+			updates._id,
 			{ $set: updates },
 			{ 
 				new: true,
-				select: '-password -validateHash' // Exclude sensitive fields from response
+				select: '-password -validateHash'
 			}
 		);
 

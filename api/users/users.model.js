@@ -78,6 +78,11 @@ const UsersSchema = new Schema({
 		type: Boolean,
 		default: false
 	},
+	status: {
+		type: String,
+		enum: ['active', 'inactive', 'pending'],
+		default: 'pending'
+	},
 	validateHash: {
 		hash: {
 			type: String,
