@@ -357,7 +357,6 @@ exports.updateEmployeeStatus = async (req, res) => {
 	console.log("updateEmployeeStatus params", req.params);
 
 	try {
-
 		const { id } = req.params;
 		const { status } = req.body;
 		const schoolId = req.user?.school;
@@ -380,20 +379,31 @@ exports.updateEmployeeStatus = async (req, res) => {
 
 		// Update user status
 		user.active = status;
+		if (!status) {
+			// If deactivating user, clear validation hash
+			user.validateHash = {
+				hash: null,
+				hashExpiration: null
+			};
+		}
 		await user.save();
+
+		// Get the calculated status
+		const calculatedStatus = user.status;
 
 		// Notify connected clients about the status change via socket
 		const SchoolSocketService = require('./school.socket');
 		const { Server } = require('socket.io');
 		const io = req.app.get('io');
 		if (io) {
-			await SchoolSocketService.notifyUserStatusChange(io, schoolId, id, status);
+			await SchoolSocketService.notifyUserStatusChange(io, schoolId, id, calculatedStatus);
 		}
 
 		res.json({
 			success: true,
 			data: {
-				message: status ? 'Collaborator successfully activated' : 'Collaborator successfully deactivated'
+				message: `Collaborator status updated to ${calculatedStatus}`,
+				status: calculatedStatus
 			}
 		});
 
@@ -442,10 +452,16 @@ exports.updateEmployee = async (req, res) => {
 			}
 		);
 
+		// Get the calculated status
+		const calculatedStatus = updatedUser.status;
+
 		res.json({
 			success: true,
 			message: 'Employee updated successfully',
-			data: updatedUser
+			data: {
+				...updatedUser.toJSON(),
+				status: calculatedStatus
+			}
 		});
 
 	} catch (error) {
@@ -454,6 +470,68 @@ exports.updateEmployee = async (req, res) => {
 			success: false,
 			message: 'Error updating employee',
 			error: error.message
+		});
+	}
+};
+
+exports.resendUserActivation = async (req, res) => {
+	try {
+		const { id } = req.params;
+		const requestingUser = req.user;
+
+		// Find the user and populate school
+		const user = await Users.findById(id).populate('school');
+		
+		if (!user) {
+			return res.status(404).json({ error: 'Usuário nao encontrado.' });
+		}
+
+		// Compare school IDs as strings to ensure proper comparison
+		if (user.school._id.toString() !== requestingUser.school.toString()) {
+			return res.status(403).json({ 
+				error: 'Sem permissão para reenviar ativação para usuários de outras escolas.' 
+			});
+		}
+
+		// Check if user is already active
+		if (user.active && !user.validateHash.hash) {
+			return res.status(400).json({ error: 'Usuário já está ativo.' });
+		}
+
+		// Generate new validation hash
+		const validationHash = randomUUID();
+		const expirationDate = new Date();
+		expirationDate.setHours(expirationDate.getHours() + 24);
+
+		// Update user with new validation hash
+		user.validateHash = {
+			hash: validationHash,
+			hashExpiration: expirationDate
+		};
+		await user.save();
+
+		// Send response immediately
+		res.status(200).json({
+			message: 'Email de ativação reenviado com sucesso',
+			user: {
+				id: user._id,
+				firstName: user.firstName,
+				lastName: user.lastName,
+				email: user.email
+			}
+		});
+
+		try {
+			await sendValidateEmail(user, user.school, validationHash);
+		} catch (emailError) {
+			// Email error doesn't affect the response since we already sent success
+			logger.error('Error sending activation email:', emailError);
+		}
+
+	} catch (error) {
+		logger.error('Error resending activation:', error);
+		res.status(500).json({
+			error: 'Erro interno ao reenviar email de ativação'
 		});
 	}
 };

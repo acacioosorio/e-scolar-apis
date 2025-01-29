@@ -102,7 +102,16 @@ const UsersSchema = new Schema({
 });
 
 UsersSchema.pre('save', async function (next) {
-	console.log("UsersSchema.pre 'save'", this.isModified('password'));
+	// Update status based on active and validateHash
+	if (this.active && this.validateHash?.hash === null) {
+		this.status = 'active';
+	} else if (!this.active && this.validateHash?.hash !== null) {
+		this.status = 'pending';
+	} else {
+		this.status = 'inactive';
+	}
+
+	// Handle password hashing
 	if (this.isModified('password') || this.isNew) {
 		const salt = await bcrypt.genSalt(10);
 		const hash = await bcrypt.hash(this.password, salt);
@@ -131,5 +140,9 @@ UsersSchema.virtual('validationPending').get(function () {
 		this.validateHash?.hashExpiration &&
 		new Date(this.validateHash.hashExpiration) > new Date();
 });
+
+// Make sure virtuals are included in JSON and Object conversions
+UsersSchema.set('toJSON', { virtuals: true });
+UsersSchema.set('toObject', { virtuals: true });
 
 module.exports = mongoose.models.Users || mongoose.model('Users', UsersSchema);

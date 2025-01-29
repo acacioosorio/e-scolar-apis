@@ -35,7 +35,7 @@ router.get('/employees', passport.authenticate('jwt-user', { session: false }), 
 router.post('/employees', passport.authenticate('jwt-user', { session: false }), authorizeRoles('backoffice', 'school'), authorizeSubRoles('admin', 'staff'), controller.addEmployee);
 router.patch('/employees/:id/status', passport.authenticate('jwt-user', { session: false }), authorizeRoles('backoffice', 'school'), authorizeSubRoles('admin', 'staff'), controller.updateEmployeeStatus);
 router.put('/employees/', passport.authenticate('jwt-user', { session: false }), authorizeRoles('backoffice', 'school'), authorizeSubRoles('admin', 'staff'), controller.updateEmployee);
-
+router.post('/employees/:id/resend-activation', passport.authenticate('jwt-user', { session: false }), authorizeRoles('backoffice', 'school'), authorizeSubRoles('admin', 'staff'), controller.resendUserActivation);
 /**
  * Segments, Year Levels and stuff
  */
