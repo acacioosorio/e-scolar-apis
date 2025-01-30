@@ -103,9 +103,12 @@ const UsersSchema = new Schema({
 
 UsersSchema.pre('save', async function (next) {
 	// Update status based on active and validateHash
-	if (this.active && this.validateHash?.hash === null) {
+
+	console.log(this.active, this.validateHash?.hash);
+
+	if (this.active === true && this.validateHash?.hash === null) {
 		this.status = 'active';
-	} else if (!this.active && this.validateHash?.hash !== null) {
+	} else if (this.active === false && this.validateHash?.hash !== null) {
 		this.status = 'pending';
 	} else {
 		this.status = 'inactive';

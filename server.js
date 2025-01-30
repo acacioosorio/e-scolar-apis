@@ -18,6 +18,9 @@ const io = new Server(server, {
 	}
 })
 
+// Make io available to our app
+app.set('io', io);
+
 const { logger } = require('./helpers/index');
 const { colorConsole } = require('tracer');
 
@@ -71,9 +74,6 @@ io.on('connection', (socket) => {
 
 	if (schoolId) {
 		socket.join(`school:${schoolId}`);
-
-		console.log(`socket.join('school:${schoolId}');`)
-		console.log("====================================================")
 		// Store connection info
 		if (!activeConnections.has(schoolId)) {
 			activeConnections.set(schoolId, new Set());
@@ -104,6 +104,23 @@ io.on('connection', (socket) => {
 			});
 		}
 	});
+});
+
+app.get('/', async (req, res) => {
+	res.send('Hello World!');
+	const rooms = io.sockets.adapter.rooms;
+	const roomNames = [];
+	rooms.forEach((value, key) => {
+		// Filtrar para excluir os IDs dos sockets (só mostrar salas reais)
+		if (!io.sockets.sockets.get(key)) {
+			roomNames.push(key);
+		}
+	});
+	console.log('Salas:', roomNames);
+
+	const SchoolSocketService = require('./api/schools/school.socket.js');
+	await SchoolSocketService.broadcastToSchool(io, '676205e2363d6e086532a532', 'user:status_change', { status: 'testing' });
+
 });
 
 // Run application

@@ -123,8 +123,6 @@ exports.schoolSignin = async (req, res) => {
 			school: user.school._id
 		};
 
-		console.warn(user.school.CNPJ);
-
 		// Keep only essential school data
 		const schoolData = {
 			name: user.school.name,
@@ -207,7 +205,6 @@ exports.checkValidation = async (req, res) => {
 }
 
 exports.validation = async (req, res) => {
-
 	let s3TempKey = null;
 	const { validationHash, password } = req.body;
 
@@ -251,6 +248,7 @@ exports.validation = async (req, res) => {
 					password: password,
 					photo: user.photo,
 					active: true,
+					status: 'active',
 					validateHash: {
 						hash: null,
 						hashExpiration: null
@@ -263,6 +261,25 @@ exports.validation = async (req, res) => {
 		if (!updatedUser) {
 			if (s3TempKey) await deleteFileFromS3(s3TempKey);
 			return res.status(500).json({ error: 'Erro ao atualizar usuário.' });
+		}
+
+		// Notify websocket about user activation if it's a school user
+		if (updatedUser.role === 'school' && updatedUser.school) {
+			const SchoolSocketService = require('../schools/school.socket');
+			const io = req.app.get('io');
+			if (io) {
+				// Clean sensitive data from user object
+				const userToSend = updatedUser.toObject();
+				delete userToSend.validationPending;
+				delete userToSend.validateHash;
+				delete userToSend.password;
+				delete userToSend.role;
+
+				await SchoolSocketService.notifyUserStatusChange(io, updatedUser.school._id, userToSend, 'active');
+				logger.info('Sent status change notification for user:', updatedUser._id);
+			} else {
+				logger.warn('Socket.io instance not available for status change notification');
+			}
 		}
 
 		return res.status(200).json({
@@ -282,5 +299,4 @@ exports.validation = async (req, res) => {
 		}
 		return res.status(500).json({ error: 'Erro interno ao validar conta.' });
 	}
-
-}
+};
