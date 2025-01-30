@@ -92,21 +92,11 @@ exports.listEmployees = async (req, res, next) => {
 		const page = parseInt(req.query.page) || 1;
 		const limit = parseInt(req.query.limit) || 10;
 		const skip = (page - 1) * limit;
+		const order = req.query.order === 'desc' ? -1 : 1;
+		const searchQuery = req.query.search || '';
+		const searchFields = req.query.searchFields ? req.query.searchFields.split(',') : ['firstName', 'lastName', 'email'];
 
-		// Build filter object from query params
-		const filterFields = ['firstName', 'lastName', 'email', 'role', 'active'];
-		const filter = { school: schoolId };
-
-		filterFields.forEach(field => {
-			if (req.query[field]) {
-				// Use case-insensitive regex for string fields
-				if (['firstName', 'lastName', 'email'].includes(field)) {
-					filter[field] = new RegExp(req.query[field], 'i');
-				} else {
-					filter[field] = req.query[field];
-				}
-			}
-		});
+		console.log(searchQuery);
 
 		if (!schoolId) {
 			return res.status(400).send({ error: 'School ID is required' });
@@ -122,39 +112,57 @@ exports.listEmployees = async (req, res, next) => {
 			return res.status(404).send({ error: 'School not found' });
 		}
 
-		// Get total count for pagination
-		const totalEmployees = await School.findById(schoolId)
-			.populate({
-				path: 'employees',
-				match: filter,
-				select: '-validateHash -password -__v'
-			})
-			.select('employees');
+		// Build filter object
+		const filter = { school: schoolId };
 
-		const totalCount = totalEmployees.employees.length;
+		// Add role filter if provided
+		if (req.query.role) {
+			filter.role = req.query.role;
+		}
+
+		// Add subRole filter if provided
+		if (req.query.subRole) {
+			filter.subRole = req.query.subRole;
+		}
+
+		// Add status filter if provided
+		if (req.query.status) {
+			filter.status = req.query.status;
+		}
+
+		// Add search conditions if search query exists
+		if (searchQuery) {
+			filter.$or = searchFields.map(field => ({
+				[field]: new RegExp(searchQuery, 'i')
+			}));
+		}
+
+		// Get total count for pagination
+		const totalCount = await Users.countDocuments(filter);
 		const totalPages = Math.ceil(totalCount / limit);
 
-		const result = await School.findById(schoolId)
-			.populate({
-				path: 'employees',
-				match: filter,
-				select: '-validateHash -password -__v',
-				options: {
-					skip: skip,
-					limit: limit
-				}
-			})
-			.select('employees name');
+		// Get users with sorting
+		const users = await Users.find(filter)
+			.select('-password -validateHash')
+			.sort({ firstName: order })
+			.skip(skip)
+			.limit(limit);
 
 		res.status(200).send({
-			employees: result.employees,
-			pagination: {
-				currentPage: page,
-				totalPages: totalPages,
-				totalItems: totalCount,
-				itemsPerPage: limit
+			success: true,
+			data: {
+				employees: users,
+				pagination: {
+					currentPage: page,
+					totalPages,
+					totalItems: totalCount,
+					itemsPerPage: limit,
+					hasNextPage: page < totalPages,
+					hasPreviousPage: page > 1
+				}
 			}
 		});
+
 	} catch (error) {
 		logger.error('Error in listEmployees:', error);
 		if (error.name === 'CastError') {
@@ -162,7 +170,7 @@ exports.listEmployees = async (req, res, next) => {
 		}
 		res.status(500).send({ error: 'Internal server error while fetching employees' });
 	}
-}
+};
 
 /**
  * 
@@ -171,7 +179,6 @@ exports.listEmployees = async (req, res, next) => {
  * @param {*} next 
  */
 exports.addEmployee = async (req, res, next) => {
-
 	try {
 		const data = req.body;
 		const schoolId = req.user?.school;
@@ -202,7 +209,32 @@ exports.addEmployee = async (req, res, next) => {
 		}
 
 		// Save user
-		await newUser.save();
+		try {
+			await newUser.save();
+		} catch (saveError) {
+			// Handle Mongoose validation errors
+			if (saveError.name === 'ValidationError') {
+				return res.status(400).json({
+					error: 'Erro de validação',
+					details: Object.values(saveError.errors).map(err => ({
+						field: err.path,
+						message: err.message
+					}))
+				});
+			}
+			// Handle duplicate key errors
+			if (saveError.code === 11000) {
+				const field = Object.keys(saveError.keyPattern)[0];
+				return res.status(400).json({
+					error: 'Erro de duplicidade',
+					details: [{
+						field,
+						message: `Este ${field} já está em uso`
+					}]
+				});
+			}
+			throw saveError; // Re-throw other errors to be caught by the outer catch
+		}
 
 		// Update school with new user
 		await School.findByIdAndUpdate(
@@ -234,11 +266,10 @@ exports.addEmployee = async (req, res, next) => {
 	} catch (error) {
 		logger.error('Error creating user:', error);
 		res.status(500).json({
-			error,
-			message: 'Erro interno ao criar usuário'
+			error: 'Erro interno ao criar usuário',
+			message: error.message
 		});
 	}
-
 };
 
 
@@ -353,8 +384,6 @@ exports.getGlobalSchoolStats = async (req, res) => {
  * @param {Object} res - Express response object
  */
 exports.updateEmployeeStatus = async (req, res) => {
-	console.log("updateEmployeeStatus body", req.body);
-	console.log("updateEmployeeStatus params", req.params);
 
 	try {
 		const { id } = req.params;
@@ -370,6 +399,7 @@ exports.updateEmployeeStatus = async (req, res) => {
 
 		// Find the user and check if they belong to the school
 		const user = await Users.findOne({ _id: id, school: schoolId });
+
 		if (!user) {
 			return res.status(404).json({
 				success: false,
@@ -390,14 +420,6 @@ exports.updateEmployeeStatus = async (req, res) => {
 
 		// Get the calculated status
 		const calculatedStatus = user.status;
-
-		// Notify connected clients about the status change via socket
-		const SchoolSocketService = require('./school.socket');
-		const { Server } = require('socket.io');
-		const io = req.app.get('io');
-		if (io) {
-			await SchoolSocketService.notifyUserStatusChange(io, schoolId, id, calculatedStatus);
-		}
 
 		res.json({
 			success: true,
@@ -473,6 +495,78 @@ exports.updateEmployee = async (req, res) => {
 		});
 	}
 };
+
+/**
+ * Delets an employee
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ */
+exports.deleteEmployee = async (req, res) => {
+	try {
+		const { id } = req.params;
+		const requestingUser = req.user;
+
+		// Find the user to be deleted
+		const userToDelete = await Users.findById(id).populate('school');
+
+		if (!userToDelete)
+			return res.status(404).json({ error: 'User not found' });
+
+		// Cannot delete yourself
+		if (id === requestingUser._id.toString()) 
+			return res.status(400).json({ error: 'Cannot delete your own account' });
+
+		// Check if requesting user has permission (same school or backoffice)
+		if (requestingUser.role !== 'backoffice') {
+			// For non-backoffice users, check if schools match
+			if (!userToDelete.school || !requestingUser.school || 
+				userToDelete.school._id.toString() !== requestingUser.school.toString()) {
+				return res.status(403).json({ 
+					error: 'You dont have permission to delete Employees from other schools' 
+				});
+			}
+		}
+
+		// Start cleanup process
+		const school = await School.findById(userToDelete.school);
+
+		if (school) {
+			// Remove user from school's employees array
+			await School.findByIdAndUpdate(school._id, { $pull: { employees: id } });
+		}
+
+		// Delete user's photo from S3 if it exists
+		if (userToDelete.photo) {
+			try {
+				const photoKey = userToDelete.photo.split('.com/')[1];
+				await deleteFileFromS3(photoKey);
+			} catch (error) {
+				logger.error('Error deleting photo from S3:', error);
+				// Continue with user deletion even if photo deletion fails
+			}
+		}
+
+		// Delete the user
+		await Users.findByIdAndDelete(id);
+
+		return res.status(200).json({
+			message: 'Usuário deletado com sucesso.',
+			data: {
+				id: userToDelete._id,
+				email: userToDelete.email,
+				role: userToDelete.role,
+				school: school ? {
+					id: school._id,
+					name: school.name
+				} : null
+			}
+		});
+
+	} catch (error) {
+		logger.error('Delete user error:', error);
+		return res.status(500).json({ error: 'Erro interno ao deletar usuário.' });
+	}
+}
 
 exports.resendUserActivation = async (req, res) => {
 	try {

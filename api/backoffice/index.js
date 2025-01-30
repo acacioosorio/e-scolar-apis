@@ -3,6 +3,7 @@
 const express = require('express');
 const controller = require('./backoffice.controller');
 const router = express.Router();
+exports.router = router;
 const passport = require('passport')
 const { authorizeRoles, authorizeSubRoles } = require('../../middleware/auth')
 const multer = require('multer');
