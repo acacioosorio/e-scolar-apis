@@ -45,6 +45,10 @@ const StudentSchema = new Schema({
 		},
 	],
 	notes: String,
+	active: {
+		type: Boolean,
+		default: false
+	},
 }, { timestamps: true })
 
 module.exports = mongoose.models.Student || mongoose.model('Student', StudentSchema);

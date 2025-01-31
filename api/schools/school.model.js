@@ -2,6 +2,7 @@ const mongoose = require('mongoose');
 const Schema = mongoose.Schema;
 const bcrypt = require('bcryptjs');
 const Users = require('../users/users.model');
+const Students = require('../students/students.model');
 
 mongoose.Promise = global.Promise;
 
@@ -69,6 +70,7 @@ const SchoolSchema = new Schema({
 			"Please add a valid Phone Number",
 		],
 	},
+	students: [{ type: Schema.Types.ObjectId, ref: "Student" }],
 	employees: [{ type: Schema.Types.ObjectId, ref: "Users" }],
 	responsiblesWaiting: [{ type: Schema.Types.ObjectId, ref: "Users" }],
 	responsiblesApproved: [{ type: Schema.Types.ObjectId, ref: "Users" }],

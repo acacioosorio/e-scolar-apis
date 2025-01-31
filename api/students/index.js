@@ -3,15 +3,50 @@
 const express = require('express');
 const controller = require('./students.controller');
 const passport = require('passport');
-const { authorizeRoles } = require('../../middleware/auth');
+const { authorizeRoles, authorizeSubRoles } = require('../../middleware/auth');
 const multer = require('multer');
-const upload = multer({ storage: multer.memoryStorage() });
+
+const upload = multer({
+    storage: multer.memoryStorage(),
+    limits: {
+        fileSize: 5 * 1024 * 1024, // 5MB limit
+    },
+    fileFilter: (req, file, cb) => {
+        if (file.mimetype.startsWith('image/')) {
+            cb(null, true);
+        } else {
+            cb(new Error('Not an image! Please upload only images.'), false);
+        }
+    }
+});
+
 const router = express.Router();
 
-router.get('/', passport.authenticate('jwt-employee', { session: false }), authorizeRoles('master', 'admin', 'teacher', 'concierge'), controller.getStudents);
-router.post('/', passport.authenticate('jwt-employee', { session: false }), authorizeRoles('master', 'admin'), upload.array('files'),  controller.createStudent);
-router.get('/:id', passport.authenticate('jwt-employee', { session: false }), authorizeRoles('master', 'admin', 'teacher', 'concierge'), controller.getStudent);
-router.put('/:id', passport.authenticate('jwt-employee', { session: false }), authorizeRoles('master', 'admin'), upload.array('files'), controller.updateStudent);
-router.delete('/:id', passport.authenticate('jwt-employee', { session: false }), authorizeRoles('master', 'admin'), controller.deleteStudent);
+// Student management routes
+router.get('/', passport.authenticate('jwt-user', { session: false }), 
+    authorizeRoles('backoffice', 'school'), 
+    authorizeSubRoles('admin', 'staff', 'teacher'), 
+    controller.listStudents
+);
+
+router.post('/', passport.authenticate('jwt-user', { session: false }), 
+    authorizeRoles('backoffice', 'school'), 
+    authorizeSubRoles('admin', 'staff'),
+    upload.single('photo'),
+    controller.addStudent
+);
+
+router.put('/', passport.authenticate('jwt-user', { session: false }), 
+    authorizeRoles('backoffice', 'school'), 
+    authorizeSubRoles('admin', 'staff'),
+    upload.single('photo'),
+    controller.updateStudent
+);
+
+router.delete('/:id', passport.authenticate('jwt-user', { session: false }), 
+    authorizeRoles('backoffice', 'school'), 
+    authorizeSubRoles('admin', 'staff'), 
+    controller.deleteStudent
+);
 
 module.exports = router;
