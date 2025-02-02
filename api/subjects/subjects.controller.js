@@ -18,9 +18,8 @@ exports.listSubjects = async (req, res) => {
 		const searchFields = req.query.searchFields ? req.query.searchFields.split(',') : ['name', 'description'];
 		const classId = req.query.classId;
 
-		if (!schoolId) {
+		if (!schoolId)
 			return res.status(400).json(createErrorResponse('School ID is required'));
-		}
 
 		// Check if user has permission to view subjects
 		if (req.user && req.user.school.toString() !== schoolId.toString() && req.user.role !== 'master')
@@ -35,16 +34,14 @@ exports.listSubjects = async (req, res) => {
 		let filter = { school: schoolId };
 
 		// Add search conditions if search query exists
-		if (searchQuery) {
+		if (searchQuery)
 			filter.$or = searchFields.map(field => ({
 				[field]: new RegExp(searchQuery, 'i')
 			}));
-		}
 
 		// Add specific class filter if provided
-		if (classId) {
+		if (classId)
 			filter.classes = classId;
-		}
 
 		// Get total count for pagination
 		const totalCount = await Subjects.countDocuments(filter);
@@ -91,11 +88,10 @@ exports.addSubject = async (req, res) => {
 		const schoolId = req.user?.school;
 
 		// Validate required fields
-		if (!data.name) {
+		if (!data.name)
 			return res.status(400).json(createErrorResponse('Validation error', [
 				{ field: 'name', message: 'Name is required' }
 			]));
-		}
 
 		// Verify all classes belong to the school if classes are provided
 		if (data.classes && data.classes.length > 0) {
@@ -104,9 +100,8 @@ exports.addSubject = async (req, res) => {
 				school: schoolId
 			});
 
-			if (classes.length !== data.classes.length) {
+			if (classes.length !== data.classes.length)
 				return res.status(400).json(createErrorResponse('One or more classes do not belong to your school'));
-			}
 		}
 
 		// Create new subject object
@@ -122,14 +117,13 @@ exports.addSubject = async (req, res) => {
 			await newSubject.save();
 		} catch (saveError) {
 			// Handle Mongoose validation errors
-			if (saveError.name === 'ValidationError') {
+			if (saveError.name === 'ValidationError')
 				return res.status(400).json(createErrorResponse('Validation error',
 					Object.values(saveError.errors).map(err => ({
 						field: err.path,
 						message: err.message
 					}))
 				));
-			}
 			throw saveError;
 		}
 
@@ -162,9 +156,8 @@ exports.updateSubject = async (req, res) => {
 			school: schoolId
 		});
 
-		if (!subjectToUpdate) {
+		if (!subjectToUpdate)
 			return res.status(404).json(createErrorResponse('Subject not found or does not belong to your school'));
-		}
 
 		// If updating classes, verify they belong to the school
 		if (updates.classes && updates.classes.length > 0) {
@@ -173,9 +166,8 @@ exports.updateSubject = async (req, res) => {
 				school: schoolId
 			});
 
-			if (newClasses.length !== updates.classes.length) {
+			if (newClasses.length !== updates.classes.length)
 				return res.status(400).json(createErrorResponse('One or more classes do not belong to your school'));
-			}
 		}
 
 		// Remove school from updates to prevent changing it
@@ -214,9 +206,8 @@ exports.deleteSubject = async (req, res) => {
 			school: schoolId
 		}).populate(['classes', 'school']);
 
-		if (!subjectToDelete) {
+		if (!subjectToDelete)
 			return res.status(404).json(createErrorResponse('Subject not found or does not belong to your school'));
-		}
 
 		// Delete the subject
 		await Subjects.findByIdAndDelete(id);

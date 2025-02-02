@@ -3,6 +3,7 @@ const Classes = require('./classes.model');
 const School = require('../schools/school.model');
 const Subjects = require('../subjects/subjects.model');
 const { logger, createErrorResponse } = require('../../helpers');
+const mongoose = require('mongoose');
 
 /**
  * List classes with filtering, searching and pagination
@@ -116,6 +117,25 @@ exports.addClass = async (req, res) => {
             }]));
         }
 
+        // Validate subjects if provided
+        if (data.subjects && Array.isArray(data.subjects)) {
+            // Validate subject IDs format
+            const invalidIds = data.subjects.filter(id => !mongoose.Types.ObjectId.isValid(id));
+            if (invalidIds.length > 0) {
+                return res.status(400).json(createErrorResponse('Invalid subject IDs provided'));
+            }
+
+            // Verify subjects exist and belong to the school
+            const validSubjects = await Subjects.find({
+                _id: { $in: data.subjects },
+                school: schoolId
+            });
+
+            if (validSubjects.length !== data.subjects.length) {
+                return res.status(400).json(createErrorResponse('One or more subjects not found or do not belong to your school'));
+            }
+        }
+
         // Create new class object
         const newClass = new Classes({
             ...data,
@@ -123,19 +143,35 @@ exports.addClass = async (req, res) => {
         });
 
         // Save class
-        try {
-            await newClass.save();
-        } catch (saveError) {
-            // Handle Mongoose validation errors
-            if (saveError.name === 'ValidationError') {
-                return res.status(400).json(createErrorResponse('Validation error',
-                    Object.values(saveError.errors).map(err => ({
-                        field: err.path,
-                        message: err.message
-                    }))
-                ));
-            }
-            throw saveError;
+        await newClass.save();
+
+        // If subjects are provided, create subject associations
+        if (data.subjects && Array.isArray(data.subjects) && data.subjects.length > 0) {
+            // Add this class to each subject's classes array
+            await Subjects.updateMany(
+                { 
+                    _id: { $in: data.subjects },
+                    school: schoolId
+                },
+                { $addToSet: { classes: newClass._id } }
+            );
+
+            // Fetch the updated class with subjects
+            const classWithSubjects = await Classes.findById(newClass._id)
+                .populate('school', 'name');
+            const subjects = await Subjects.find({ 
+                classes: classWithSubjects._id,
+                school: schoolId 
+            }).select('name description');
+
+            return res.status(201).json({
+                success: true,
+                message: 'Class created successfully with subjects',
+                data: {
+                    ...classWithSubjects.toObject(),
+                    subjects
+                }
+            });
         }
 
         res.status(201).json({
@@ -146,6 +182,14 @@ exports.addClass = async (req, res) => {
 
     } catch (error) {
         logger.error('Error creating class:', error);
+        if (error.name === 'ValidationError') {
+            return res.status(400).json(createErrorResponse('Validation error',
+                Object.values(error.errors).map(err => ({
+                    field: err.path,
+                    message: err.message
+                }))
+            ));
+        }
         res.status(500).json(createErrorResponse('Internal error while creating class', error.message));
     }
 };
@@ -181,6 +225,61 @@ exports.updateClass = async (req, res) => {
             }
         }
 
+        // Validate subjects if provided
+        if (updates.subjects && Array.isArray(updates.subjects)) {
+            // Validate subject IDs format
+            const invalidIds = updates.subjects.filter(id => !mongoose.Types.ObjectId.isValid(id));
+            if (invalidIds.length > 0) {
+                return res.status(400).json(createErrorResponse('Invalid subject IDs provided'));
+            }
+
+            // Verify subjects exist and belong to the school
+            const validSubjects = await Subjects.find({
+                _id: { $in: updates.subjects },
+                school: schoolId
+            });
+
+            if (validSubjects.length !== updates.subjects.length) {
+                return res.status(400).json(createErrorResponse('One or more subjects not found or do not belong to your school'));
+            }
+
+            // Get current subjects for this class
+            const currentSubjects = await Subjects.find({ 
+                classes: classToUpdate._id,
+                school: schoolId 
+            }).select('_id');
+            const currentSubjectIds = currentSubjects.map(s => s._id.toString());
+            
+            // Find subjects to add and remove
+            const subjectsToAdd = updates.subjects.filter(id => !currentSubjectIds.includes(id.toString()));
+            const subjectsToRemove = currentSubjectIds.filter(id => !updates.subjects.includes(id.toString()));
+
+            // Add class to new subjects
+            if (subjectsToAdd.length > 0) {
+                await Subjects.updateMany(
+                    { 
+                        _id: { $in: subjectsToAdd },
+                        school: schoolId 
+                    },
+                    { $addToSet: { classes: classToUpdate._id } }
+                );
+            }
+
+            // Remove class from removed subjects
+            if (subjectsToRemove.length > 0) {
+                await Subjects.updateMany(
+                    { 
+                        _id: { $in: subjectsToRemove },
+                        school: schoolId 
+                    },
+                    { $pull: { classes: classToUpdate._id } }
+                );
+            }
+
+            // Remove subjects from updates object as we've handled them separately
+            delete updates.subjects;
+        }
+
         // Update class information
         const updatedClass = await Classes.findByIdAndUpdate(
             updates._id,
@@ -188,14 +287,34 @@ exports.updateClass = async (req, res) => {
             { new: true }
         ).populate('school', 'name');
 
+        // Get updated subjects list
+        const subjects = await Subjects.find({ 
+            classes: updatedClass._id,
+            school: schoolId 
+        }).select('name description');
+
         res.json({
             success: true,
             message: 'Class updated successfully',
-            data: updatedClass
+            data: {
+                ...updatedClass.toObject(),
+                subjects
+            }
         });
 
     } catch (error) {
         logger.error('Error updating class:', error);
+        if (error.name === 'CastError') {
+            return res.status(400).json(createErrorResponse('Invalid ID format'));
+        }
+        if (error.name === 'ValidationError') {
+            return res.status(400).json(createErrorResponse('Validation error',
+                Object.values(error.errors).map(err => ({
+                    field: err.path,
+                    message: err.message
+                }))
+            ));
+        }
         res.status(500).json(createErrorResponse('Error updating class', error.message));
     }
 };
