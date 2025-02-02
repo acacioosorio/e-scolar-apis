@@ -1,9 +1,10 @@
 const { randomUUID } = require('crypto');
 const Student = require('./students.model');
 const School = require('../schools/school.model');
-const { logger, saveFileToS3, deleteFileFromS3 } = require('../../helpers');
+const { logger, saveFileToS3, deleteFileFromS3, createErrorResponse } = require('../../helpers');
 const slugify = require('slugify');
 const Jimp = require('jimp');
+const Classes = require('../classes/classes.model');
 
 /**
  * List students with filtering, searching and pagination
@@ -19,15 +20,15 @@ exports.listStudents = async (req, res) => {
 		const searchFields = req.query.searchFields ? req.query.searchFields.split(',') : ['name', 'registration'];
 
 		if (!schoolId)
-			return res.status(400).send({ error: 'School ID is required' });
+			return res.status(400).json(createErrorResponse('School ID is required'));
 
 		// Check if user has permission to view students
 		if (req.user && req.user.school.toString() !== schoolId.toString() && req.user.role !== 'master')
-			return res.status(403).send({ error: 'Not authorized to view students from this school' });
+			return res.status(403).json(createErrorResponse('Not authorized to view students from this school'));
 
 		const school = await School.findById(schoolId);
 		if (!school)
-			return res.status(404).send({ error: 'School not found' });
+			return res.status(404).json(createErrorResponse('School not found'));
 
 		// Build filter object
 		const filter = { school: schoolId };
@@ -99,9 +100,9 @@ exports.listStudents = async (req, res) => {
 	} catch (error) {
 		logger.error('Error in listStudents:', error);
 		if (error.name === 'CastError') {
-			return res.status(400).send({ error: 'Invalid ID format' });
+			return res.status(400).json(createErrorResponse('Invalid ID format'));
 		}
-		res.status(500).send({ error: 'Internal server error while fetching students' });
+		res.status(500).json(createErrorResponse('Internal server error while fetching students'));
 	}
 };
 
@@ -112,6 +113,14 @@ exports.addStudent = async (req, res) => {
 	try {
 		const data = req.body;
 		const schoolId = req.user?.school;
+
+		if (!data.name || !data.registration || !data.class) {
+			return res.status(400).json(createErrorResponse('Validation error', [
+				{ field: 'name', message: 'Name is required' },
+				{ field: 'registration', message: 'Registration is required' },
+				{ field: 'class', message: 'Class is required' }
+			].filter(field => !data[field.field])));
+		}
 
 		// Handle photo upload if provided
 		if (req.file) {
@@ -144,6 +153,16 @@ exports.addStudent = async (req, res) => {
 			}
 		}
 
+		// Verify class belongs to school
+		const studentClass = await Classes.findOne({
+			_id: data.class,
+			school: schoolId
+		});
+
+		if (!studentClass) {
+			return res.status(404).json(createErrorResponse('Class not found or does not belong to your school'));
+		}
+
 		// Create new student object [OK]
 		const newStudent = new Student({
 			...data,
@@ -158,13 +177,12 @@ exports.addStudent = async (req, res) => {
 		} catch (saveError) {
 			// Handle Mongoose validation errors
 			if (saveError.name === 'ValidationError') {
-				return res.status(400).json({
-					error: 'Erro de validação',
-					details: Object.values(saveError.errors).map(err => ({
+				return res.status(400).json(createErrorResponse('Validation error',
+					Object.values(saveError.errors).map(err => ({
 						field: err.path,
 						message: err.message
 					}))
-				});
+				));
 			}
 			// Handle duplicate key errors
 			if (saveError.code === 11000) {
@@ -200,10 +218,7 @@ exports.addStudent = async (req, res) => {
 
 	} catch (error) {
 		logger.error('Error creating student:', error);
-		res.status(500).json({
-			error: 'Erro interno ao criar estudante',
-			message: error.message
-		});
+		res.status(500).json(createErrorResponse('Internal error while creating student', error.message));
 	}
 };
 
@@ -222,10 +237,18 @@ exports.updateStudent = async (req, res) => {
 		// Find the student and check if they belong to the school
 		const student = await Student.findOne({ _id: updates._id, school: schoolId });
 		if (!student) {
-			return res.status(404).json({
-				success: false,
-				message: 'Student not found or does not belong to this school'
+			return res.status(404).json(createErrorResponse('Student not found or does not belong to your school\'s classes'));
+		}
+
+		if (updates.class) {
+			const newClass = await Classes.findOne({
+				_id: updates.class,
+				school: schoolId
 			});
+
+			if (!newClass) {
+				return res.status(400).json(createErrorResponse('Class not found or does not belong to your school'));
+			}
 		}
 
 		// Handle photo upload if provided
@@ -268,11 +291,7 @@ exports.updateStudent = async (req, res) => {
 
 	} catch (error) {
 		logger.error('Error updating student:', error);
-		res.status(500).json({
-			success: false,
-			message: 'Error updating student',
-			error: error.message
-		});
+		res.status(500).json(createErrorResponse('Error updating student', error.message));
 	}
 };
 
@@ -288,7 +307,7 @@ exports.deleteStudent = async (req, res) => {
 		const studentToDelete = await Student.findById(id).populate('school');
 
 		if (!studentToDelete)
-			return res.status(404).json({ error: 'Student not found' });
+			return res.status(404).json(createErrorResponse('Student not found or does not belong to your school\'s classes'));
 
 		// Check if requesting user has permission (same school or backoffice)
 		if (requestingUser.role !== 'backoffice') {
@@ -338,6 +357,6 @@ exports.deleteStudent = async (req, res) => {
 
 	} catch (error) {
 		logger.error('Delete student error:', error);
-		return res.status(500).json({ error: 'Erro interno ao deletar estudante.' });
+		return res.status(500).json(createErrorResponse('Internal error while deleting student'));
 	}
 };

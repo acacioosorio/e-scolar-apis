@@ -9,7 +9,7 @@ const School = require('./school.model')
 const Users = require('../users/users.model');
 const Student = require('../students/students.model')
 
-const { logger, saveFileToS3, deleteFileFromS3 } = require('../../helpers');
+const { logger, saveFileToS3, deleteFileFromS3, createErrorResponse } = require('../../helpers');
 const { sendValidateEmail } = require('../../helpers/emails');
 
 /**
@@ -55,7 +55,7 @@ exports.create = async (req, res, next) => {
 
 		for (const key of s3TempKeys) await deleteFileFromS3(key); // Cleanup S3 on error
 
-		res.status(500).send({ error: error });
+		res.status(500).json(createErrorResponse('Internal error while creating school', error.message));
 	}
 };
 
@@ -74,7 +74,10 @@ exports.listSchools = async (req, res, next) => {
 		res.status(200).send({ schools });
 	} catch (error) {
 		logger.error(error);
-		res.status(500).send({ error: error });
+		if (error.name === 'CastError') {
+			return res.status(400).json(createErrorResponse('Invalid ID format'));
+		}
+		res.status(500).json(createErrorResponse('Internal server error while fetching schools'));
 	}
 }
 
@@ -214,24 +217,19 @@ exports.addEmployee = async (req, res, next) => {
 		} catch (saveError) {
 			// Handle Mongoose validation errors
 			if (saveError.name === 'ValidationError') {
-				return res.status(400).json({
-					error: 'Erro de validação',
-					details: Object.values(saveError.errors).map(err => ({
+				return res.status(400).json(createErrorResponse('Validation error',
+					Object.values(saveError.errors).map(err => ({
 						field: err.path,
 						message: err.message
 					}))
-				});
+				));
 			}
 			// Handle duplicate key errors
 			if (saveError.code === 11000) {
 				const field = Object.keys(saveError.keyPattern)[0];
-				return res.status(400).json({
-					error: 'Erro de duplicidade',
-					details: [{
-						field,
-						message: `Este ${field} já está em uso`
-					}]
-				});
+				return res.status(400).json(createErrorResponse('Duplicate error', [
+					{ field, message: `Este ${field} já está em uso` }
+				].filter(field => !data[field.field])));
 			}
 			throw saveError; // Re-throw other errors to be caught by the outer catch
 		}
@@ -265,10 +263,7 @@ exports.addEmployee = async (req, res, next) => {
 
 	} catch (error) {
 		logger.error('Error creating user:', error);
-		res.status(500).json({
-			error: 'Erro interno ao criar usuário',
-			message: error.message
-		});
+		res.status(500).json(createErrorResponse('Internal error while creating user', error.message));
 	}
 };
 
@@ -318,11 +313,7 @@ exports.getSchoolStats = async (req, res) => {
 			data: stats
 		});
 	} catch (error) {
-		res.status(500).json({
-			success: false,
-			message: 'Error fetching school statistics',
-			error: error.message
-		});
+		res.status(500).json(createErrorResponse('Error fetching school statistics', error.message));
 	}
 };
 
@@ -370,11 +361,7 @@ exports.getGlobalSchoolStats = async (req, res) => {
 			data: stats[0]
 		});
 	} catch (error) {
-		res.status(500).json({
-			success: false,
-			message: 'Error fetching global school statistics',
-			error: error.message
-		});
+		res.status(500).json(createErrorResponse('Error fetching global school statistics', error.message));
 	}
 };
 
@@ -431,11 +418,7 @@ exports.updateEmployeeStatus = async (req, res) => {
 
 	} catch (error) {
 		logger.error('Error updating user status:', error);
-		res.status(500).json({
-			success: false,
-			message: 'Error updating user status',
-			error: error.message
-		});
+		res.status(500).json(createErrorResponse('Error updating user status', error.message));
 	}
 };
 
@@ -458,10 +441,7 @@ exports.updateEmployee = async (req, res) => {
 		// Find the user and check if they belong to the school
 		const user = await Users.findOne({ _id: updates._id, school: schoolId });
 		if (!user) {
-			return res.status(404).json({
-				success: false,
-				message: 'User not found or does not belong to this school'
-			});
+			return res.status(404).json(createErrorResponse('User not found or does not belong to this school'));
 		}
 
 		// Update user information
@@ -488,11 +468,7 @@ exports.updateEmployee = async (req, res) => {
 
 	} catch (error) {
 		logger.error('Error updating employee:', error);
-		res.status(500).json({
-			success: false,
-			message: 'Error updating employee',
-			error: error.message
-		});
+		res.status(500).json(createErrorResponse('Error updating employee', error.message));
 	}
 };
 
@@ -510,20 +486,18 @@ exports.deleteEmployee = async (req, res) => {
 		const userToDelete = await Users.findById(id).populate('school');
 
 		if (!userToDelete)
-			return res.status(404).json({ error: 'User not found' });
+			return res.status(404).json(createErrorResponse('User not found'));
 
 		// Cannot delete yourself
 		if (id === requestingUser._id.toString()) 
-			return res.status(400).json({ error: 'Cannot delete your own account' });
+			return res.status(400).json(createErrorResponse('Cannot delete your own account'));
 
 		// Check if requesting user has permission (same school or backoffice)
 		if (requestingUser.role !== 'backoffice') {
 			// For non-backoffice users, check if schools match
 			if (!userToDelete.school || !requestingUser.school || 
 				userToDelete.school._id.toString() !== requestingUser.school.toString()) {
-				return res.status(403).json({ 
-					error: 'You dont have permission to delete Employees from other schools' 
-				});
+				return res.status(403).json(createErrorResponse('You dont have permission to delete Employees from other schools'));
 			}
 		}
 
@@ -564,7 +538,7 @@ exports.deleteEmployee = async (req, res) => {
 
 	} catch (error) {
 		logger.error('Delete user error:', error);
-		return res.status(500).json({ error: 'Erro interno ao deletar usuário.' });
+		return res.status(500).json(createErrorResponse('Internal error while deleting user'));
 	}
 }
 
@@ -577,19 +551,17 @@ exports.resendUserActivation = async (req, res) => {
 		const user = await Users.findById(id).populate('school');
 		
 		if (!user) {
-			return res.status(404).json({ error: 'Usuário nao encontrado.' });
+			return res.status(404).json(createErrorResponse('Usuário nao encontrado'));
 		}
 
 		// Compare school IDs as strings to ensure proper comparison
 		if (user.school._id.toString() !== requestingUser.school.toString()) {
-			return res.status(403).json({ 
-				error: 'Sem permissão para reenviar ativação para usuários de outras escolas.' 
-			});
+			return res.status(403).json(createErrorResponse('Sem permissão para reenviar ativação para usuários de outras escolas'));
 		}
 
 		// Check if user is already active
 		if (user.active && !user.validateHash.hash) {
-			return res.status(400).json({ error: 'Usuário já está ativo.' });
+			return res.status(400).json(createErrorResponse('Usuário já está ativo'));
 		}
 
 		// Generate new validation hash
@@ -624,8 +596,6 @@ exports.resendUserActivation = async (req, res) => {
 
 	} catch (error) {
 		logger.error('Error resending activation:', error);
-		res.status(500).json({
-			error: 'Erro interno ao reenviar email de ativação'
-		});
+		res.status(500).json(createErrorResponse('Erro interno ao reenviar email de ativação'));
 	}
 };

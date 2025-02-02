@@ -3,7 +3,8 @@ const jwt = require('jsonwebtoken');
 const passport = require('passport');
 const bcrypt = require('bcryptjs');
 const Users = require('../users/users.model'); // Adjust path as needed
-const { logger, saveFileToS3, deleteFileFromS3 } = require('../../helpers');
+const { logger, saveFileToS3, deleteFileFromS3, createErrorResponse } = require('../../helpers');
+const { randomUUID } = require('crypto');
 
 exports.signup = async (req, res) => {
 	try {
@@ -17,23 +18,23 @@ exports.signup = async (req, res) => {
 };
 
 exports.signin = async (req, res) => {
-
 	const cpf = req.body.cpf;
 	const password = req.body.password;
 
-	try {
+	if (!cpf || !password) {
+		return res.status(400).json(createErrorResponse('CPF and password are required'));
+	}
 
+	try {
 		const user = await User.findOne({ 'documents.cpf': cpf });
 
-		if (!user) return res.status(404).json({ message: 'User not found' });
+		if (!user) return res.status(404).json(createErrorResponse('User not found'));
 
 		bcrypt.compare(password, user.password).then(isMatch => {
 			if (isMatch) {
-
 				const payload = { id: user.id, name: user.firstName, roles: user.roles };
 
 				jwt.sign(payload, process.env.SESSION_SECRET, { expiresIn: 31556926 }, (err, token) => {
-
 					const simplifiedUser = {
 						firstName: user.firstName,
 						lastName: user.lastName,
@@ -42,16 +43,14 @@ exports.signin = async (req, res) => {
 					};
 
 					res.status(200).send({ message: 'Logged in successfully', user: simplifiedUser, token: 'Bearer ' + token });
-
 				});
 			} else {
-				return res.status(400).json({ message: 'Password incorrect' });
+				return res.status(400).json(createErrorResponse('Password incorrect'));
 			}
 		});
-
 	} catch (error) {
 		logger.error(error)
-		res.status(500).send(error);
+		res.status(500).json(createErrorResponse('Internal error during login', error.message));
 	}
 };
 
@@ -59,17 +58,19 @@ exports.backofficeSignin = async (req, res, next) => {
 	const email = req.body.email;
 	const password = req.body.password;
 
+	if (!email || !password) {
+		return res.status(400).json(createErrorResponse('Email and password are required'));
+	}
+
 	try {
 		const user = await Users.findOne({ 'email': email });
-		if (!user) return res.status(404).json({ message: 'User not found' });
+		if (!user) return res.status(404).json(createErrorResponse('User not found'));
 
 		bcrypt.compare(password, user.password).then(isMatch => {
 			if (isMatch) {
-
 				const payload = { id: user.id, name: user.firstName, roles: user.roles };
 
 				jwt.sign(payload, process.env.SESSION_SECRET, { expiresIn: 31556926 }, (err, token) => {
-
 					return res.json({
 						message: 'Login BackOffice bem-sucedido.',
 						token,
@@ -82,37 +83,39 @@ exports.backofficeSignin = async (req, res, next) => {
 							photo: user.photo
 						},
 					});
-
 				});
 			} else {
-				return res.status(400).json({ message: 'Password incorrect' });
+				return res.status(400).json(createErrorResponse('Password incorrect'));
 			}
 		});
-
-	} catch {
+	} catch (error) {
 		logger.error(error)
-		res.status(500).send(error);
+		res.status(500).json(createErrorResponse('Internal error during login', error.message));
 	}
 }
 
 exports.schoolSignin = async (req, res) => {
 	const { email, password } = req.body;
 
+	if (!email || !password) {
+		return res.status(400).json(createErrorResponse('Email and password are required'));
+	}
+
 	try {
 		const user = await Users.findOne({ 'email': email }).populate('school');
 
-		if (!user) return res.status(404).json({ message: 'User not found' });
+		if (!user) return res.status(404).json(createErrorResponse('User not found'));
 		
 		if (user.role !== 'school')
-			return res.status(403).json({ message: 'Unauthorized access. This endpoint is for school users only.' });
+			return res.status(403).json(createErrorResponse('Unauthorized access. This endpoint is for school users only.'));
 
 		if (!user.active)
-			return res.status(403).json({ message: 'Your account is inactive. Please contact your administrator.' });
+			return res.status(403).json(createErrorResponse('Your account is inactive. Please contact your administrator.'));
 
 		const isMatch = await bcrypt.compare(password, user.password);
 		
 		if (!isMatch)
-			return res.status(400).json({ message: 'Password incorrect' });
+			return res.status(400).json(createErrorResponse('Password incorrect'));
 
 		const payload = { 
 			id: user.id, 
@@ -138,7 +141,7 @@ exports.schoolSignin = async (req, res) => {
 		jwt.sign(payload, process.env.SESSION_SECRET, { expiresIn: 31556926 }, (err, token) => {
 			if (err) {
 				logger.error('JWT Sign Error:', err);
-				return res.status(500).json({ message: 'Error generating token' });
+				return res.status(500).json(createErrorResponse('Error generating token', err.message));
 			}
 
 			return res.json({
@@ -157,7 +160,7 @@ exports.schoolSignin = async (req, res) => {
 
 	} catch (error) {
 		logger.error('School signin error:', error);
-		res.status(500).json({ message: 'Internal server error during login' });
+		res.status(500).json(createErrorResponse('Internal server error during login', error.message));
 	}
 }
 
@@ -166,27 +169,18 @@ exports.checkValidation = async (req, res) => {
 		const { hash } = req.params;
 
 		if (!hash) {
-			return res.status(400).json({
-				valid: false,
-				error: 'Hash de validação é obrigatório.'
-			});
+			return res.status(400).json(createErrorResponse('Validation hash is required'));
 		}
 
 		const user = await Users.findOne({ 'validateHash.hash': hash });
 
 		if (!user) {
-			return res.status(400).json({
-				valid: false,
-				error: 'Hash de validação inválido ou já utilizado.'
-			});
+			return res.status(404).json(createErrorResponse('Invalid or expired validation hash'));
 		}
 
 		// Check if validation hash is expired
 		if (new Date() > user.validateHash.hashExpiration) {
-			return res.status(400).json({
-				valid: false,
-				error: 'Link de validação expirado.'
-			});
+			return res.status(400).json(createErrorResponse('Link de validação expirado.'));
 		}
 
 		return res.status(200).json({
@@ -197,10 +191,7 @@ exports.checkValidation = async (req, res) => {
 
 	} catch (error) {
 		console.error('Check validation error:', error);
-		return res.status(500).json({
-			valid: false,
-			error: 'Erro interno ao verificar hash de validação.'
-		});
+		return res.status(500).json(createErrorResponse('Internal error during account validation', error.message));
 	}
 }
 
@@ -209,19 +200,19 @@ exports.validation = async (req, res) => {
 	const { validationHash, password } = req.body;
 
 	if (!validationHash) {
-		return res.status(400).json({ error: 'Hash de validação é obrigatório.' });
+		return res.status(400).json(createErrorResponse('Validation hash is required'));
 	}
 
 	try {
 		// Find user by validation hash
 		const user = await Users.findOne({ 'validateHash.hash': validationHash }).populate('school');
 
-		if (!user) return res.status(404).json({ error: 'Hash de validação inválido.' });
+		if (!user) return res.status(404).json(createErrorResponse('Invalid or expired validation hash'));
 
-		if (user.role !== 'school') return res.status(403).json({ error: 'Esta rota é apenas para validação de escolas.' });
+		if (user.role !== 'school') return res.status(403).json(createErrorResponse('Esta rota é apenas para validação de escolas.'));
 
 		// Check if validation hash is expired
-		if (new Date() > user.validateHash.hashExpiration) return res.status(400).json({ error: 'Link de validação expirado.' });
+		if (new Date() > user.validateHash.hashExpiration) return res.status(400).json(createErrorResponse('Link de validação expirado.'));
 
 		// Handle photo upload if provided
 		if (req.file) {
@@ -236,7 +227,7 @@ exports.validation = async (req, res) => {
 				user.photo = savedFile.Location;
 			} catch (uploadError) {
 				console.error('Error uploading photo:', uploadError);
-				return res.status(500).json({ error: 'Erro ao fazer upload da foto.' });
+				return res.status(500).json(createErrorResponse('Erro ao fazer upload da foto.', uploadError.message));
 			}
 		}
 
@@ -260,7 +251,7 @@ exports.validation = async (req, res) => {
 
 		if (!updatedUser) {
 			if (s3TempKey) await deleteFileFromS3(s3TempKey);
-			return res.status(500).json({ error: 'Erro ao atualizar usuário.' });
+			return res.status(500).json(createErrorResponse('Erro ao atualizar usuário.'));
 		}
 
 		// Notify websocket about user activation if it's a school user
@@ -297,6 +288,6 @@ exports.validation = async (req, res) => {
 				console.error('Error cleaning up S3:', deleteError);
 			}
 		}
-		return res.status(500).json({ error: 'Erro interno ao validar conta.' });
+		return res.status(500).json(createErrorResponse('Internal error during account validation', error.message));
 	}
 };

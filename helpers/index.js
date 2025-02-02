@@ -92,10 +92,21 @@ function deleteFileFromS3(key) {
 	return s3.deleteObject(params).promise();
 }
 
+function createErrorResponse(message, details = null) {
+	return {
+		success: false,
+		error: {
+			message,
+			details: details || undefined
+		}
+	};
+}
+
 module.exports = {
 	clearString,
 	str2slug,
 	logger,
 	saveFileToS3,
-	deleteFileFromS3
+	deleteFileFromS3,
+	createErrorResponse
 };

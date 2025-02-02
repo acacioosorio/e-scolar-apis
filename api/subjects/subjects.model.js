@@ -5,6 +5,11 @@ mongoose.Promise = global.Promise;
 
 const SubjectSchema = new Schema(
 	{
+		school: {
+			type: Schema.Types.ObjectId,
+			ref: "School",
+			required: [true, "School is required"],
+		},
 		classes: [
 			{
 				type: Schema.Types.ObjectId,

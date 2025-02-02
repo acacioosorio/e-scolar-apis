@@ -1,7 +1,8 @@
 const { randomUUID } = require('crypto');
 const Classes = require('./classes.model');
 const School = require('../schools/school.model');
-const { logger } = require('../../helpers');
+const Subjects = require('../subjects/subjects.model');
+const { logger, createErrorResponse } = require('../../helpers');
 
 /**
  * List classes with filtering, searching and pagination
@@ -17,17 +18,17 @@ exports.listClasses = async (req, res) => {
         const searchFields = req.query.searchFields ? req.query.searchFields.split(',') : ['name'];
 
         if (!schoolId) {
-            return res.status(400).send({ error: 'School ID is required' });
+            return res.status(400).json(createErrorResponse('School ID is required'));
         }
 
         // Check if user has permission to view classes
         if (req.user && req.user.school.toString() !== schoolId.toString() && req.user.role !== 'master') {
-            return res.status(403).send({ error: 'Not authorized to view classes from this school' });
+            return res.status(403).json(createErrorResponse('Not authorized to view classes from this school'));
         }
 
         const school = await School.findById(schoolId);
         if (!school) {
-            return res.status(404).send({ error: 'School not found' });
+            return res.status(404).json(createErrorResponse('School not found'));
         }
 
         // Build filter object
@@ -51,10 +52,22 @@ exports.listClasses = async (req, res) => {
             .limit(limit)
             .populate('school', 'name');
 
+        // Get subjects for each class
+        const classesWithSubjects = await Promise.all(classes.map(async (classItem) => {
+            const subjects = await Subjects.find({ classes: classItem._id })
+                .select('name description');
+            
+            const classObj = classItem.toObject();
+            return {
+                ...classObj,
+                subjects: subjects
+            };
+        }));
+
         res.status(200).send({
             success: true,
             data: {
-                classes,
+                classes: classesWithSubjects,
                 pagination: {
                     currentPage: page,
                     totalPages,
@@ -69,9 +82,9 @@ exports.listClasses = async (req, res) => {
     } catch (error) {
         logger.error('Error in listClasses:', error);
         if (error.name === 'CastError') {
-            return res.status(400).send({ error: 'Invalid ID format' });
+            return res.status(400).json(createErrorResponse('Invalid ID format'));
         }
-        res.status(500).send({ error: 'Internal server error while fetching classes' });
+        res.status(500).json(createErrorResponse('Internal server error while fetching classes'));
     }
 };
 
@@ -85,14 +98,11 @@ exports.addClass = async (req, res) => {
 
         // Validate required fields
         if (!data.name || !data.startDate || !data.endDate) {
-            return res.status(400).json({
-                error: 'Validation error',
-                details: [
-                    { field: 'name', message: 'Name is required' },
-                    { field: 'startDate', message: 'Start date is required' },
-                    { field: 'endDate', message: 'End date is required' }
-                ].filter(field => !data[field.field])
-            });
+            return res.status(400).json(createErrorResponse('Validation error', [
+                { field: 'name', message: 'Name is required' },
+                { field: 'startDate', message: 'Start date is required' },
+                { field: 'endDate', message: 'End date is required' }
+            ].filter(field => !data[field.field])));
         }
 
         // Validate dates
@@ -100,13 +110,10 @@ exports.addClass = async (req, res) => {
         const endDate = new Date(data.endDate);
         
         if (endDate <= startDate) {
-            return res.status(400).json({
-                error: 'Validation error',
-                details: [{
-                    field: 'endDate',
-                    message: 'End date must be after start date'
-                }]
-            });
+            return res.status(400).json(createErrorResponse('Validation error', [{
+                field: 'endDate',
+                message: 'End date must be after start date'
+            }]));
         }
 
         // Create new class object
@@ -121,13 +128,12 @@ exports.addClass = async (req, res) => {
         } catch (saveError) {
             // Handle Mongoose validation errors
             if (saveError.name === 'ValidationError') {
-                return res.status(400).json({
-                    error: 'Validation error',
-                    details: Object.values(saveError.errors).map(err => ({
+                return res.status(400).json(createErrorResponse('Validation error',
+                    Object.values(saveError.errors).map(err => ({
                         field: err.path,
                         message: err.message
                     }))
-                });
+                ));
             }
             throw saveError;
         }
@@ -140,10 +146,7 @@ exports.addClass = async (req, res) => {
 
     } catch (error) {
         logger.error('Error creating class:', error);
-        res.status(500).json({
-            error: 'Internal error while creating class',
-            message: error.message
-        });
+        res.status(500).json(createErrorResponse('Internal error while creating class', error.message));
     }
 };
 
@@ -162,10 +165,7 @@ exports.updateClass = async (req, res) => {
         // Find the class and check if it belongs to the school
         const classToUpdate = await Classes.findOne({ _id: updates._id, school: schoolId });
         if (!classToUpdate) {
-            return res.status(404).json({
-                success: false,
-                message: 'Class not found or does not belong to this school'
-            });
+            return res.status(404).json(createErrorResponse('Class not found or does not belong to this school'));
         }
 
         // Validate dates if they are being updated
@@ -174,13 +174,10 @@ exports.updateClass = async (req, res) => {
             const endDate = new Date(updates.endDate || classToUpdate.endDate);
             
             if (endDate <= startDate) {
-                return res.status(400).json({
-                    error: 'Validation error',
-                    details: [{
-                        field: 'endDate',
-                        message: 'End date must be after start date'
-                    }]
-                });
+                return res.status(400).json(createErrorResponse('Validation error', [{
+                    field: 'endDate',
+                    message: 'End date must be after start date'
+                }]));
             }
         }
 
@@ -199,11 +196,7 @@ exports.updateClass = async (req, res) => {
 
     } catch (error) {
         logger.error('Error updating class:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Error updating class',
-            error: error.message
-        });
+        res.status(500).json(createErrorResponse('Error updating class', error.message));
     }
 };
 
@@ -219,7 +212,7 @@ exports.deleteClass = async (req, res) => {
         const classToDelete = await Classes.findById(id).populate('school');
 
         if (!classToDelete) {
-            return res.status(404).json({ error: 'Class not found' });
+            return res.status(404).json(createErrorResponse('Class not found'));
         }
 
         // Check if requesting user has permission (same school or backoffice)
@@ -227,9 +220,7 @@ exports.deleteClass = async (req, res) => {
             // For non-backoffice users, check if schools match
             if (!classToDelete.school || !requestingUser.school || 
                 classToDelete.school._id.toString() !== requestingUser.school.toString()) {
-                return res.status(403).json({ 
-                    error: 'You dont have permission to delete classes from other schools' 
-                });
+                return res.status(403).json(createErrorResponse('You dont have permission to delete classes from other schools'));
             }
         }
 
@@ -251,6 +242,6 @@ exports.deleteClass = async (req, res) => {
 
     } catch (error) {
         logger.error('Delete class error:', error);
-        return res.status(500).json({ error: 'Internal error while deleting class' });
+        return res.status(500).json(createErrorResponse('Internal error while deleting class'));
     }
 };
