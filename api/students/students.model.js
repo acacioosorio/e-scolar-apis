@@ -37,7 +37,13 @@ const StudentSchema = new Schema({
 	inQueue: { type: Boolean, default: false },
 	responsibles: [{ type: Schema.Types.ObjectId, ref: "Users" }],
 	school: { type: Schema.Types.ObjectId, ref: "School" },
-	class: { type: Schema.Types.ObjectId, ref: 'Classes' },
+	classes: [
+		{
+			type: Schema.Types.ObjectId,
+			ref: "Classes",
+			required: true,
+		},
+	],
 	history: [
 		{
 			responsible: { type: Schema.Types.ObjectId, ref: "Users" },

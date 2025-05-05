@@ -56,7 +56,7 @@ exports.listClasses = async (req, res) => {
         // Get subjects for each class
         const classesWithSubjects = await Promise.all(classes.map(async (classItem) => {
             const subjects = await Subjects.find({ classes: classItem._id })
-                .select('name description');
+                .select('name description').populate('employees', 'name email photo');
             
             const classObj = classItem.toObject();
             return {

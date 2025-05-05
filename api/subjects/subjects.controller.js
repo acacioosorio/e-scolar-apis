@@ -2,7 +2,9 @@ const { randomUUID } = require('crypto');
 const Subjects = require('./subjects.model');
 const Classes = require('../classes/classes.model');
 const School = require('../schools/school.model');
+const Users = require('../users/users.model');
 const { logger, createErrorResponse } = require('../../helpers');
+const mongoose = require('mongoose');
 
 /**
  * List subjects with filtering, searching and pagination
@@ -47,13 +49,14 @@ exports.listSubjects = async (req, res) => {
 		const totalCount = await Subjects.countDocuments(filter);
 		const totalPages = Math.ceil(totalCount / limit);
 
-		// Get subjects with sorting and populate classes
+		// Get subjects with sorting and populate classes and employees
 		const subjects = await Subjects.find(filter)
 			.sort({ [req.query.sortBy || 'name']: order })
 			.skip(skip)
 			.limit(limit)
 			.populate('classes', 'name')
-			.populate('school', 'name');
+			.populate('school', 'name')
+			.populate('employees', 'firstName lastName email photo');
 
 		res.status(200).send({
 			success: true,
@@ -104,31 +107,42 @@ exports.addSubject = async (req, res) => {
 				return res.status(400).json(createErrorResponse('One or more classes do not belong to your school'));
 		}
 
+		// Verify all employees exist and belong to the school if provided
+		if (data.employees && data.employees.length > 0) {
+			const employees = await Users.find({
+				_id: { $in: data.employees },
+				school: schoolId,
+				role: 'school',
+				subRole: 'teacher'
+			});
+
+			console.log("employees", employees);
+
+			if (employees.length !== data.employees.length)
+				return res.status(400).json(createErrorResponse('One or more teachers not found or do not belong to your school'));
+		}
+
 		// Create new subject object
 		const newSubject = new Subjects({
 			name: data.name,
 			description: data.description,
 			classes: data.classes || [],
+			employees: data.employees || [],
 			school: schoolId
 		});
 
 		// Save subject
-		try {
-			await newSubject.save();
-		} catch (saveError) {
-			// Handle Mongoose validation errors
-			if (saveError.name === 'ValidationError')
-				return res.status(400).json(createErrorResponse('Validation error',
-					Object.values(saveError.errors).map(err => ({
-						field: err.path,
-						message: err.message
-					}))
-				));
-			throw saveError;
-		}
+		await newSubject.save();
 
-		// Populate classes and school before sending response
-		await newSubject.populate(['classes', 'school']);
+		// Populate classes, employees and school before sending response
+		await newSubject.populate([
+			'classes',
+			{ 
+				path: 'employees',
+				select: 'firstName lastName email photo'
+			},
+			'school'
+		]);
 
 		res.status(201).json({
 			success: true,
@@ -138,6 +152,14 @@ exports.addSubject = async (req, res) => {
 
 	} catch (error) {
 		logger.error('Error creating subject:', error);
+		if (error.name === 'ValidationError') {
+			return res.status(400).json(createErrorResponse('Validation error',
+				Object.values(error.errors).map(err => ({
+					field: err.path,
+					message: err.message
+				}))
+			));
+		}
 		res.status(500).json(createErrorResponse('Internal error while creating subject', error.message));
 	}
 };
@@ -149,6 +171,8 @@ exports.updateSubject = async (req, res) => {
 	try {
 		const updates = req.body;
 		const schoolId = req.user?.school;
+
+		logger.info(`Updating subject ${updates._id} for school ${schoolId}`);
 
 		// Find the subject and verify it belongs to the school
 		const subjectToUpdate = await Subjects.findOne({
@@ -170,6 +194,39 @@ exports.updateSubject = async (req, res) => {
 				return res.status(400).json(createErrorResponse('One or more classes do not belong to your school'));
 		}
 
+		// If updating employees, verify they exist and are teachers in the school
+		if (updates.employees && Array.isArray(updates.employees)) {
+			logger.info('Validating teachers:', updates.employees);
+
+			// First verify all IDs are valid ObjectIds
+			const invalidIds = updates.employees.filter(id => !mongoose.Types.ObjectId.isValid(id));
+			if (invalidIds.length > 0) {
+				return res.status(400).json(createErrorResponse('Invalid teacher ID format'));
+			}
+
+			const newEmployees = await Users.find({
+				_id: { $in: updates.employees },
+				role: 'school',
+				subRole: 'teacher'
+			}).select('_id firstName lastName school role subRole');
+
+			logger.info('Found teachers:', newEmployees);
+
+			// Check if all teachers were found
+			if (newEmployees.length !== updates.employees.length) {
+				return res.status(400).json(createErrorResponse('One or more teachers not found'));
+			}
+
+			// Check if all teachers belong to the school
+			const invalidTeachers = newEmployees.filter(teacher => 
+				!teacher.school || teacher.school.toString() !== schoolId.toString()
+			);
+
+			if (invalidTeachers.length > 0) {
+				return res.status(400).json(createErrorResponse('One or more teachers do not belong to your school'));
+			}
+		}
+
 		// Remove school from updates to prevent changing it
 		delete updates.school;
 
@@ -178,7 +235,14 @@ exports.updateSubject = async (req, res) => {
 			updates._id,
 			{ $set: updates },
 			{ new: true }
-		).populate(['classes', 'school']);
+		).populate([
+			'classes',
+			{
+				path: 'employees',
+				select: 'firstName lastName email photo'
+			},
+			'school'
+		]);
 
 		res.json({
 			success: true,
@@ -188,6 +252,17 @@ exports.updateSubject = async (req, res) => {
 
 	} catch (error) {
 		logger.error('Error updating subject:', error);
+		if (error.name === 'CastError') {
+			return res.status(400).json(createErrorResponse('Invalid ID format'));
+		}
+		if (error.name === 'ValidationError') {
+			return res.status(400).json(createErrorResponse('Validation error',
+				Object.values(error.errors).map(err => ({
+					field: err.path,
+					message: err.message
+				}))
+			));
+		}
 		res.status(500).json(createErrorResponse('Error updating subject', error.message));
 	}
 };

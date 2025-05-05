@@ -8,6 +8,9 @@ module.exports = function (app) {
 
 	app.use('/api/classes', require('./api/classes'));
 	app.use('/api/subjects', require('./api/subjects'));
+
+	// Register the new pedagogy routes
+    app.use("/api/pedagogy", require("./api/pedagogy"));
 };
 
 // Create an API and Store following FLUX Architecture pattern to make a GET request to "/api/schools/stats" 

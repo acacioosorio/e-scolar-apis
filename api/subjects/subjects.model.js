@@ -17,6 +17,13 @@ const SubjectSchema = new Schema(
 				required: true,
 			},
 		],
+		employees: [
+			{
+				type: Schema.Types.ObjectId,
+				ref: "Users",
+				required: true,
+			},
+		],
 		name: {
 			type: String,
 			required: [true, "Please add a Subject name"],

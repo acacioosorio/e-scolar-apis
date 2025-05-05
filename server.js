@@ -107,7 +107,7 @@ io.on('connection', (socket) => {
 });
 
 app.get('/', async (req, res) => {
-	res.send('Hello World!');
+	
 	const rooms = io.sockets.adapter.rooms;
 	const roomNames = [];
 	rooms.forEach((value, key) => {
@@ -116,10 +116,11 @@ app.get('/', async (req, res) => {
 			roomNames.push(key);
 		}
 	});
-	console.log('Salas:', roomNames);
 
-	const SchoolSocketService = require('./api/schools/school.socket.js');
-	await SchoolSocketService.broadcastToSchool(io, '676205e2363d6e086532a532', 'user:status_change', { status: 'testing' });
+	res.status(200).send({ rooms: roomNames });
+
+	// const SchoolSocketService = require('./api/schools/school.socket.js');
+	// await SchoolSocketService.broadcastToSchool(io, '676205e2363d6e086532a532', 'user:status_change', { status: 'testing' });
 
 });
 

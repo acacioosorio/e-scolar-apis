@@ -49,4 +49,36 @@ router.delete('/:id', passport.authenticate('jwt-user', { session: false }),
     controller.deleteStudent
 );
 
+router.post(
+    '/:studentId/guardians',
+    passport.authenticate('jwt-user', { session: false }),
+    authorizeRoles('backoffice', 'school'),
+    authorizeSubRoles('admin', 'staff'),
+    controller.linkResponsibles
+);
+
+router.delete(
+    '/:studentId/guardians/:guardianId',
+    passport.authenticate('jwt-user', { session: false }),
+    authorizeRoles('backoffice', 'school'),
+    authorizeSubRoles('admin', 'staff'),
+    controller.unlinkResponsibles
+);
+
+router.patch(
+    '/:studentId/activate',
+    passport.authenticate('jwt-user', { session: false }),
+    authorizeRoles('backoffice', 'school'),
+    authorizeSubRoles('admin', 'staff'),
+    controller.activateStudent
+);
+
+router.patch(
+    '/:studentId/deactivate',
+    passport.authenticate('jwt-user', { session: false }),
+    authorizeRoles('backoffice', 'school'),
+    authorizeSubRoles('admin', 'staff'),
+    controller.deactivateStudent
+);
+
 module.exports = router;
