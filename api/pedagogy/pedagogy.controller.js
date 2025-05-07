@@ -2,6 +2,7 @@ const EducationalSegment = require("./educationalSegment.model");
 const YearLevel = require("./yearLevel.model");
 const School = require("../schools/school.model");
 const Class = require("../classes/classes.model");
+const Subject = require("../subjects/subjects.model");
 const { logger, createErrorResponse } = require("../../helpers");
 const mongoose = require("mongoose");
 
@@ -12,19 +13,67 @@ const mongoose = require("mongoose");
  */
 exports.listSegments = async (req, res) => {
     try {
-        const schoolId = req.user?.school;
-        const segments = await EducationalSegment.find({ school: schoolId })
-            .sort({ order: 1, name: 1 })
-            // Populate yearLevels associated with this segment
-            // This might need adjustment depending on how we query N:N
-            // Maybe populate yearLevels based on YearLevel.find({ educationalSegments: segment._id })
-            // For simplicity now, let's keep it, but it might show all year levels linked to the segment
-            .populate("yearLevels", "name acronym order");
+        const schoolId = req.query.id || req.user?.school;
+		const page = parseInt(req.query.page) || 1;
+		const limit = parseInt(req.query.limit) || 10;
+		const skip = (page - 1) * limit;
+		const order = req.query.order === 'desc' ? -1 : 1;
+		const searchQuery = req.query.search || '';
+		const searchFields = req.query.searchFields ? req.query.searchFields.split(',') : ['name', 'acronym'];
 
-        res.status(200).json({ success: true, data: { segments } });
+		if (!schoolId) {
+			return res.status(400).send({ error: 'School ID is required' });
+		}
+
+		if (req.user && req.user.school.toString() !== schoolId.toString() && req.user.role !== 'master')
+			return res.status(403).json(createErrorResponse('Not authorized to view year levels from this school'));
+
+		const school = await School.findById(schoolId);
+		
+		if (!school)
+			return res.status(404).json(createErrorResponse('School not found'));
+
+		const filter = { school: schoolId };
+
+		if (req.query.status) filter.status = req.query.status === 'active' ? true : false;
+
+		if (searchQuery)
+			filter.$or = searchFields.map(field => ({
+				[field]: new RegExp(searchQuery, 'i')
+			}));
+
+		const totalCount = await EducationalSegment.countDocuments(filter);
+		const totalPages = Math.ceil(totalCount / limit);
+
+		const segments = await EducationalSegment.find(filter)
+		.sort({ [req.query.sortBy || 'name']: order })
+		.skip(skip)
+		.limit(limit)
+		.populate('yearLevels', 'name acronym order')
+		.populate('subjects', 'name description');
+
+		res.status(200).send({
+			success: true,
+			data: {
+				segments,
+				pagination: {
+					currentPage: page,
+					totalPages,
+					totalItems: totalCount,
+					itemsPerPage: limit,
+					hasNextPage: page < totalPages,
+					hasPreviousPage: page > 1
+				}
+			}
+		});
+
     } catch (error) {
         logger.error("Error listing educational segments:", error);
-        res.status(500).json(createErrorResponse("Internal server error while fetching segments"));
+		
+		if (error.name === 'CastError')
+			return res.status(400).json(createErrorResponse('Invalid ID format'));
+
+        res.status(500).json(createErrorResponse("Internal server error while fetching educational segments", error.message));
     }
 };
 
@@ -67,12 +116,15 @@ exports.updateSegment = async (req, res) => {
         }
         delete updates.school;
         delete updates.yearLevels; // Prevent direct manipulation of yearLevels array here
+        delete updates.subjects; // Prevent direct manipulation of subjects array here
 
         const updatedSegment = await EducationalSegment.findOneAndUpdate(
             { _id: segmentId, school: schoolId },
             { $set: updates },
             { new: true, runValidators: true }
-        ).populate("yearLevels", "name acronym order");
+        )
+        .populate("yearLevels", "name acronym order")
+        .populate("subjects", "name description");
 
         if (!updatedSegment) {
             return res.status(404).json(createErrorResponse("Segment not found or does not belong to this school"));
@@ -103,8 +155,19 @@ exports.deleteSegment = async (req, res) => {
             return res.status(404).json(createErrorResponse("Segment not found or does not belong to this school", error.message));
         }
 
-        // Check if any YearLevel is associated ONLY with this segment before deleting
-        // Or simply remove the segment from all associated YearLevels
+        // Check if there are any subjects associated with this segment
+        const subjectsCount = await Subject.countDocuments({ educationalSegment: id });
+        if (subjectsCount > 0) {
+            return res.status(400).json(createErrorResponse("Cannot delete segment with associated subjects. Please remove subjects first.", error.message));
+        }
+
+        // Check if there are any classes associated with this segment
+        const classesCount = await Class.countDocuments({ educationalSegments: id });
+        if (classesCount > 0) {
+            return res.status(400).json(createErrorResponse("Cannot delete segment with associated classes. Please remove classes first.", error.message));
+        }
+
+        // Remove segment from all associated YearLevels
         await YearLevel.updateMany(
             { school: schoolId, educationalSegments: id },
             { $pull: { educationalSegments: id } }
@@ -120,40 +183,80 @@ exports.deleteSegment = async (req, res) => {
     }
 };
 
-// --- Year Level Controller Functions (Adjusted for N:N) ---
+// --- Year Level Controller Functions ---
 
 /**
  * List Year Levels (optionally filtered by segment)
  */
 exports.listYearLevels = async (req, res) => {
     try {
-        const schoolId = req.user?.school;
+		const schoolId = req.query.id || req.user?.school;
+		const page = parseInt(req.query.page) || 1;
+		const limit = parseInt(req.query.limit) || 10;
+		const skip = (page - 1) * limit;
+		const order = req.query.order === 'desc' ? -1 : 1;
+		const searchQuery = req.query.search || '';
+		const searchFields = req.query.searchFields ? req.query.searchFields.split(',') : ['name', 'acronym'];
+		const classId = req.query.classId;
         const segmentId = req.query.segmentId;
 
+		if (!schoolId) {
+			return res.status(400).send({ error: 'School ID is required' });
+		}
+
+		if (req.user && req.user.school.toString() !== schoolId.toString() && req.user.role !== 'master')
+			return res.status(403).json(createErrorResponse('Not authorized to view year levels from this school'));
+
+		const school = await School.findById(schoolId);
+		if (!school)
+			return res.status(404).json(createErrorResponse('School not found'));
+
         const filter = { school: schoolId };
-        // if (segmentId) {
-        //     if (!mongoose.Types.ObjectId.isValid(segmentId)) {
-        //         return res.status(400).json(createErrorResponse("Invalid Segment ID format"));
-        //     }
-        //     filter.educationalSegments = segmentId;
-        // }
+		
+		if (classId) filter.classes = classId;
 
-        const yearLevels = await YearLevel.find(filter)
-            .sort({ order: 1, name: 1 })
-            // Populate the segments array
-            .populate("educationalSegments", "name acronym")
-            .populate("classes", "name");
+		if (req.query.status) filter.status = req.query.status === 'active' ? true : false;
 
-        res.status(200).json({ success: true, data: { yearLevels } });
+		if (searchQuery)
+			filter.$or = searchFields.map(field => ({
+				[field]: new RegExp(searchQuery, 'i')
+			}));
+
+		const totalCount = await YearLevel.countDocuments(filter);
+		const totalPages = Math.ceil(totalCount / limit);
+
+		const yearLevels = await YearLevel.find(filter)
+		.sort({ [req.query.sortBy || 'name']: order })
+		.skip(skip)
+		.limit(limit)
+		.populate('educationalSegments', 'name acronym type')
+
+		res.status(200).send({
+			success: true,
+			data: {
+				yearLevels,
+				pagination: {
+					currentPage: page,
+					totalPages,
+					totalItems: totalCount,
+					itemsPerPage: limit,
+					hasNextPage: page < totalPages,
+					hasPreviousPage: page > 1
+				}
+			}
+		});
+
     } catch (error) {
         logger.error("Error listing year levels:", error);
+		if (error.name === 'CastError')
+			return res.status(400).json(createErrorResponse('Invalid ID format'));
+
         res.status(500).json(createErrorResponse("Internal server error while fetching year levels", error.message));
     }
 };
 
 /**
  * Add a new Year Level
- * Can optionally include an array of educationalSegment IDs to associate with.
  */
 exports.addYearLevel = async (req, res) => {
     try {
@@ -177,7 +280,7 @@ exports.addYearLevel = async (req, res) => {
         const newYearLevel = new YearLevel({
             ...data,
             school: schoolId,
-            educationalSegments: validSegmentIds, // Assign validated segment IDs
+            educationalSegments: validSegmentIds,
         });
 
         await newYearLevel.save();
@@ -190,9 +293,9 @@ exports.addYearLevel = async (req, res) => {
             );
         }
 
-        // Populate segments before sending response
         const populatedYearLevel = await YearLevel.findById(newYearLevel._id)
-                                        .populate("educationalSegments", "name acronym");
+            .populate("educationalSegments", "name acronym")
+            .populate("classes", "name");
 
         res.status(201).json({ success: true, message: "Year Level created successfully", data: populatedYearLevel });
 
@@ -218,14 +321,13 @@ exports.updateYearLevel = async (req, res) => {
             return res.status(400).json(createErrorResponse("Year Level ID is required for update"));
         }
 
-        // Prevent updating school directly
-        delete updates.school;
-
         const yearLevelToUpdate = await YearLevel.findOne({ _id: yearLevelId, school: schoolId });
-
         if (!yearLevelToUpdate) {
             return res.status(404).json(createErrorResponse("Year Level not found or does not belong to this school"));
         }
+
+        delete updates.school;
+        delete updates.classes; // Prevent direct manipulation of classes array here
 
         // Handle educationalSegments updates if provided
         if (updates.educationalSegments) {

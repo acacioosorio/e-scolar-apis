@@ -23,33 +23,26 @@ exports.listSubjects = async (req, res) => {
 		if (!schoolId)
 			return res.status(400).json(createErrorResponse('School ID is required'));
 
-		// Check if user has permission to view subjects
 		if (req.user && req.user.school.toString() !== schoolId.toString() && req.user.role !== 'master')
 			return res.status(403).json(createErrorResponse('Not authorized to view subjects from this school'));
 
-		// Verify the school exists
 		const school = await School.findById(schoolId);
 		if (!school)
 			return res.status(404).json(createErrorResponse('School not found'));
 
-		// Build filter object starting with school
 		let filter = { school: schoolId };
 
-		// Add search conditions if search query exists
 		if (searchQuery)
 			filter.$or = searchFields.map(field => ({
 				[field]: new RegExp(searchQuery, 'i')
 			}));
 
-		// Add specific class filter if provided
 		if (classId)
 			filter.classes = classId;
 
-		// Get total count for pagination
 		const totalCount = await Subjects.countDocuments(filter);
 		const totalPages = Math.ceil(totalCount / limit);
 
-		// Get subjects with sorting and populate classes and employees
 		const subjects = await Subjects.find(filter)
 			.sort({ [req.query.sortBy || 'name']: order })
 			.skip(skip)

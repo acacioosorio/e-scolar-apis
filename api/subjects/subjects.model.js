@@ -10,6 +10,10 @@ const SubjectSchema = new Schema(
 			ref: "School",
 			required: [true, "School is required"],
 		},
+		educationalSegment: {
+			type: Schema.Types.ObjectId,
+			ref: "EducationalSegment",
+		},
 		classes: [
 			{
 				type: Schema.Types.ObjectId,

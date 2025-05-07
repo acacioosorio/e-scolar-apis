@@ -40,7 +40,7 @@ const YearLevelSchema = new Schema(
             type: Number,
             default: 0,
         },
-        active: {
+        status: {
             type: Boolean,
             default: true,
         },

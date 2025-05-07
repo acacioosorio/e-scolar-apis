@@ -140,6 +140,8 @@ exports.listEmployees = async (req, res, next) => {
 			}));
 		}
 
+		console.log(filter);
+
 		// Get total count for pagination
 		const totalCount = await Users.countDocuments(filter);
 		const totalPages = Math.ceil(totalCount / limit);

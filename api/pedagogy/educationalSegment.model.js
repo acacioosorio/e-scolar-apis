@@ -54,6 +54,13 @@ const EducationalSegmentSchema = new Schema(
 				ref: "YearLevel",
 			},
 		],
+		// Array of Subjects belonging to this segment
+		subjects: [
+			{
+				type: Schema.Types.ObjectId,
+				ref: "Subjects",
+			},
+		],
 	},
 	{ timestamps: true }
 );

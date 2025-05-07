@@ -22,6 +22,14 @@ const ClassSchema = new Schema(
 			type: Date,
 			required: [true, "Please add an end date"],
 		},
+		// Array of Educational Segments this class belongs to
+		educationalSegments: [
+			{
+				type: Schema.Types.ObjectId,
+				ref: "EducationalSegment",
+				required: true,
+			},
+		],
 	},
 	{ timestamps: true }
 );

@@ -4,6 +4,7 @@ const School = require('../schools/school.model');
 const Subjects = require('../subjects/subjects.model');
 const { logger, createErrorResponse } = require('../../helpers');
 const mongoose = require('mongoose');
+const EducationalSegment = require('../pedagogy/educationalSegment.model');
 
 /**
  * List classes with filtering, searching and pagination
@@ -342,6 +343,18 @@ exports.deleteClass = async (req, res) => {
                 return res.status(403).json(createErrorResponse('You dont have permission to delete classes from other schools'));
             }
         }
+
+        // Remove this class from all associated subjects
+        await Subjects.updateMany(
+            { classes: id },
+            { $pull: { classes: id } }
+        );
+
+        // Remove this class from all associated educational segments
+        await EducationalSegment.updateMany(
+            { yearLevels: { $in: classToDelete.yearLevels } },
+            { $pull: { yearLevels: classToDelete._id } }
+        );
 
         // Delete the class
         await Classes.findByIdAndDelete(id);
