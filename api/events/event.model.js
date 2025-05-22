@@ -1,3 +1,6 @@
+// Event Model
+// ./api/events/event.model.js
+
 const mongoose = require("mongoose");
 const Schema = mongoose.Schema;
 

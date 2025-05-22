@@ -1,3 +1,6 @@
+// School Socket
+// ./api/schools/school.socket.js
+
 class SchoolSocketService {
 	static async broadcastToSchool(io, schoolId, event, data) {
 		try {

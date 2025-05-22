@@ -1,3 +1,6 @@
+// Pedagogy Router
+// ./api/pedagogy/index.js
+
 'use strict';
 
 const express = require('express');
@@ -16,7 +19,7 @@ router.get('/segments',
 	controller.listSegments
 );
 
-// Add a new segment
+// // Add a new segment
 router.post('/segments',
 	passport.authenticate('jwt-user', { session: false }),
 	authorizeRoles('backoffice', 'school'),
@@ -24,8 +27,15 @@ router.post('/segments',
 	controller.addSegment
 );
 
+router.get('/segments/:id',
+	passport.authenticate('jwt-user', { session: false }),
+	authorizeRoles('backoffice', 'school'),
+	authorizeSubRoles('admin', 'staff'), // Only admins can get segments
+	controller.getSegment
+);
+
 // Update a segment
-router.put('/segments',
+router.put('/segments/:id',
 	passport.authenticate('jwt-user', { session: false }),
 	authorizeRoles('backoffice', 'school'),
 	authorizeSubRoles('admin', 'staff'), // Only admins can update segments
@@ -40,13 +50,22 @@ router.delete('/segments/:id',
 	controller.deleteSegment
 );
 
+// GET /api/pedagogy/segments/:segmentId/year-levels
+router.get(
+	'/segments/:segmentId/year-levels',
+	passport.authenticate('jwt-user', { session: false }),
+	authorizeRoles('backoffice', 'school'),
+	authorizeSubRoles('admin', 'staff', 'teacher'),
+	controller.listYearLevelsBySegment
+);
+
 // --- Year Level Routes ---
 
-// List all year levels (optionally filtered by segment)
+// List all year levels
 router.get('/year-levels',
 	passport.authenticate('jwt-user', { session: false }),
 	authorizeRoles('backoffice', 'school'),
-	authorizeSubRoles('admin', 'staff'), // Adjust roles as needed
+	authorizeSubRoles('admin', 'staff'),
 	controller.listYearLevels
 );
 
@@ -54,15 +73,23 @@ router.get('/year-levels',
 router.post('/year-levels',
 	passport.authenticate('jwt-user', { session: false }),
 	authorizeRoles('backoffice', 'school'),
-	authorizeSubRoles('admin', 'staff'), // Only admins can create year levels
+	authorizeSubRoles('admin', 'staff'),
 	controller.addYearLevel
 );
 
-// Update a year level
-router.put('/year-levels',
+// Get a year level
+router.get('/year-levels/:id',
 	passport.authenticate('jwt-user', { session: false }),
 	authorizeRoles('backoffice', 'school'),
-	authorizeSubRoles('admin', 'staff'), // Only admins can update year levels
+	authorizeSubRoles('admin', 'staff'),
+	controller.getYearLevel
+);
+
+// Update a year level
+router.put('/year-levels/:id',
+	passport.authenticate('jwt-user', { session: false }),
+	authorizeRoles('backoffice', 'school'),
+	authorizeSubRoles('admin', 'staff'),
 	controller.updateYearLevel
 );
 
@@ -70,7 +97,7 @@ router.put('/year-levels',
 router.delete('/year-levels/:id',
 	passport.authenticate('jwt-user', { session: false }),
 	authorizeRoles('backoffice', 'school'),
-	authorizeSubRoles('admin', 'staff'), // Only admins can delete year levels
+	authorizeSubRoles('admin', 'staff'),
 	controller.deleteYearLevel
 );
 

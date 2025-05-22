@@ -11,6 +11,20 @@ module.exports = function (app) {
 
 	// Register the new pedagogy routes
     app.use("/api/pedagogy", require("./api/pedagogy"));
+
+	app.use('/api/segments',       require('./api/pedagogy'));  // lista segments, add segment
+	app.use('/api/academic-years', require('./api/pedagogy'));  // lista/year-crud
+	app.use('/api/year-levels',    require('./api/pedagogy'));
+
+	app.use("/api/rooms", require("./api/rooms"));
+	app.use("/api/academic-years", require("./api/academic-years"));
+
+	app.use('/api/lessons', require('./api/lessons'));
+
+	app.use('/api/marks', require('./api/marks'));
+
+	app.use('/api/enrollment', require('./api/enrollment'));
+
 };
 
 // Create an API and Store following FLUX Architecture pattern to make a GET request to "/api/schools/stats" 

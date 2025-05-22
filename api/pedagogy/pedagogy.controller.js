@@ -1,3 +1,6 @@
+// Pedagogy Controller
+// ./api/pedagogy/pedagogy.controller.js
+
 const EducationalSegment = require("./educationalSegment.model");
 const YearLevel = require("./yearLevel.model");
 const School = require("../schools/school.model");
@@ -12,12 +15,18 @@ const mongoose = require("mongoose");
  * List Educational Segments for the school
  */
 exports.listSegments = async (req, res) => {
-    try {
-        const schoolId = req.query.id || req.user?.school;
-		const page = parseInt(req.query.page) || 1;
-		const limit = parseInt(req.query.limit) || 10;
+	try {
+		const schoolId = req.query.id || req.user?.school;
+
+		const {
+			page = parseInt(req.query.page) || 1,
+			limit = parseInt(req.query.limit) || 10,
+			sortBy = 'order',
+			order = req.query.order === 'desc' ? -1 : 1
+		} = req.query;
+
 		const skip = (page - 1) * limit;
-		const order = req.query.order === 'desc' ? -1 : 1;
+
 		const searchQuery = req.query.search || '';
 		const searchFields = req.query.searchFields ? req.query.searchFields.split(',') : ['name', 'acronym'];
 
@@ -29,28 +38,28 @@ exports.listSegments = async (req, res) => {
 			return res.status(403).json(createErrorResponse('Not authorized to view year levels from this school'));
 
 		const school = await School.findById(schoolId);
-		
+
 		if (!school)
 			return res.status(404).json(createErrorResponse('School not found'));
 
 		const filter = { school: schoolId };
 
-		if (req.query.status) filter.status = req.query.status === 'active' ? true : false;
+		if (req.query.status) filter.status = req.query.status;
 
 		if (searchQuery)
 			filter.$or = searchFields.map(field => ({
 				[field]: new RegExp(searchQuery, 'i')
 			}));
 
-		const totalCount = await EducationalSegment.countDocuments(filter);
-		const totalPages = Math.ceil(totalCount / limit);
 
-		const segments = await EducationalSegment.find(filter)
-		.sort({ [req.query.sortBy || 'name']: order })
-		.skip(skip)
-		.limit(limit)
-		.populate('yearLevels', 'name acronym order')
-		.populate('subjects', 'name description');
+		const [totalCount, segments] = await Promise.all([
+			EducationalSegment.countDocuments(filter),
+			EducationalSegment.find(filter)
+				.sort({ [sortBy]: order === 'desc' ? -1 : 1 })
+				.skip(+skip).limit(+limit)
+		]);
+
+		const totalPages = Math.ceil(totalCount / limit);
 
 		res.status(200).send({
 			success: true,
@@ -67,138 +76,215 @@ exports.listSegments = async (req, res) => {
 			}
 		});
 
-    } catch (error) {
-        logger.error("Error listing educational segments:", error);
-		
+	} catch (error) {
+		logger.error("Error listing educational segments:", error);
+
 		if (error.name === 'CastError')
 			return res.status(400).json(createErrorResponse('Invalid ID format'));
 
-        res.status(500).json(createErrorResponse("Internal server error while fetching educational segments", error.message));
-    }
+		res.status(500).json(createErrorResponse("Internal server error while fetching educational segments", error.message));
+	}
+};
+
+exports.getSegment = async (req, res) => {
+	try {
+		const schoolId = req.user.school;
+		const { id } = req.params;
+
+		const segment = await EducationalSegment.findOne({ _id: id, school: schoolId });
+		if (!segment)
+			return sendError(res, 404, 'Segment not found');
+
+		return res.json({ success: true, data: segment });
+	} catch (err) {
+		logger.error('getSegment error:', err);
+		return sendError(res, err.name === 'CastError' ? 400 : 500, err.message);
+	}
+};
+
+/**
+ * LIST YearLevels filtered by EducationalSegment
+ * GET /segments/:segmentId/year-levels
+ */
+exports.listYearLevelsBySegment = async (req, res) => {
+	try {
+		const schoolId = req.user.school;
+		const { segmentId } = req.params;
+
+		// 1) valida que o Segment existe na escola
+		const seg = await EducationalSegment.findOne({
+			_id: segmentId,
+			school: schoolId
+		});
+		if (!seg) {
+			return res
+				.status(404)
+				.json({ success: false, message: 'Educational Segment not found' });
+		}
+
+		// 2) busca todos os YearLevels desse segmento
+		const yearLevels = await YearLevel.find({
+			educationalSegment: segmentId,
+			school: schoolId,
+			//status: 'active'        // opcional: só ativos
+		}).sort({ order: 1 })       // em ordem crescente
+
+		// 3) envia a resposta
+		res.status(200).send({
+			success: true,
+			data: {
+				yearLevels
+			}
+		});
+
+	} catch (err) {
+		console.error('listYearLevelsBySegment error', err);
+		if (err.name === 'CastError') {
+			return res
+				.status(400)
+				.json({ success: false, message: 'Invalid ID format' });
+		}
+		return res
+			.status(500)
+			.json({ success: false, message: 'Internal server error' });
+	}
 };
 
 /**
  * Add a new Educational Segment
  */
 exports.addSegment = async (req, res) => {
-    try {
-        const data = req.body;
-        const schoolId = req.user?.school;
+	try {
+		const data = req.body;
+		const schoolId = req.user?.school;
 
-        const newSegment = new EducationalSegment({
-            ...data,
-            school: schoolId,
-        });
+		// Validate status if provided
+		if (data.status && !['active', 'disabled', 'archived'].includes(data.status)) {
+			return res.status(400).json(createErrorResponse('Invalid status value. Must be one of: active, disabled, archived'));
+		}
 
-        await newSegment.save();
-        res.status(201).json({ success: true, message: "Segment created successfully", data: newSegment });
+		const newSegment = new EducationalSegment({
+			...data,
+			school: schoolId,
+		});
 
-    } catch (error) {
-        logger.error("Error creating educational segment:", error);
-        if (error.name === "ValidationError" || error.code === 11000) {
-            return res.status(400).json(createErrorResponse("Validation/Duplicate error", error.message));
-        }
-        res.status(500).json(createErrorResponse("Internal error while creating segment", error.message));
-    }
+		await newSegment.save();
+		res.status(201).json({ success: true, message: "Segment created successfully", data: newSegment });
+
+	} catch (error) {
+		logger.error("Error creating educational segment:", error);
+		if (error.name === "ValidationError" || error.code === 11000) {
+			return res.status(400).json(createErrorResponse("Validation/Duplicate error", error.message));
+		}
+		res.status(500).json(createErrorResponse("Internal error while creating segment", error.message));
+	}
 };
 
 /**
  * Update an Educational Segment
  */
 exports.updateSegment = async (req, res) => {
-    try {
-        const updates = req.body;
-        const schoolId = req.user?.school;
-        const segmentId = updates._id;
+	try {
+		const updates = req.body;
+		const schoolId = req.user?.school;
+		const segmentId = req.params.id;
 
-        if (!segmentId) {
-            return res.status(400).json(createErrorResponse("Segment ID is required for update"));
-        }
-        delete updates.school;
-        delete updates.yearLevels; // Prevent direct manipulation of yearLevels array here
-        delete updates.subjects; // Prevent direct manipulation of subjects array here
+		if (!segmentId) {
+			return res.status(400).json(createErrorResponse("Segment ID is required for update"));
+		}
 
-        const updatedSegment = await EducationalSegment.findOneAndUpdate(
-            { _id: segmentId, school: schoolId },
-            { $set: updates },
-            { new: true, runValidators: true }
-        )
-        .populate("yearLevels", "name acronym order")
-        .populate("subjects", "name description");
+		// Validate status if provided
+		if (updates.status && !['active', 'disabled', 'archived'].includes(updates.status)) {
+			return res.status(400).json(createErrorResponse('Invalid status value. Must be one of: active, disabled, archived'));
+		}
 
-        if (!updatedSegment) {
-            return res.status(404).json(createErrorResponse("Segment not found or does not belong to this school"));
-        }
+		delete updates.school;
+		delete updates.yearLevels; // Prevent direct manipulation of yearLevels array here
+		delete updates.subjects; // Prevent direct manipulation of subjects array here
 
-        res.status(200).json({ success: true, message: "Segment updated successfully", data: updatedSegment });
+		const updatedSegment = await EducationalSegment.findOneAndUpdate(
+			{ _id: segmentId, school: schoolId },
+			{ $set: updates },
+			{ new: true, runValidators: true }
+		);
 
-    } catch (error) {
-        logger.error("Error updating educational segment:", error);
-        if (error.name === "ValidationError" || error.code === 11000) {
-            return res.status(400).json(createErrorResponse("Validation/Duplicate error", error.message));
-        }
-        res.status(500).json(createErrorResponse("Internal error while updating segment", error.message));
-    }
+		if (!updatedSegment) {
+			return res.status(404).json(createErrorResponse("Segment not found or does not belong to this school"));
+		}
+
+		res.status(200).json({ success: true, message: "Segment updated successfully", data: updatedSegment });
+
+	} catch (error) {
+		logger.error("Error updating educational segment:", error);
+		if (error.name === "ValidationError" || error.code === 11000) {
+			return res.status(400).json(createErrorResponse("Validation/Duplicate error", error.message));
+		}
+		res.status(500).json(createErrorResponse("Internal error while updating segment", error.message));
+	}
 };
 
 /**
  * Delete an Educational Segment
  */
 exports.deleteSegment = async (req, res) => {
-    try {
-        const { id } = req.params;
-        const schoolId = req.user?.school;
+	try {
+		const { id } = req.params;
+		const schoolId = req.user?.school;
 
-        const segmentToDelete = await EducationalSegment.findOne({ _id: id, school: schoolId });
+		const segmentToDelete = await EducationalSegment.findOne({ _id: id, school: schoolId });
 
-        if (!segmentToDelete) {
-            return res.status(404).json(createErrorResponse("Segment not found or does not belong to this school", error.message));
-        }
+		if (!segmentToDelete) {
+			return res.status(404).json(createErrorResponse("Segment not found or does not belong to this school", error.message));
+		}
 
-        // Check if there are any subjects associated with this segment
-        const subjectsCount = await Subject.countDocuments({ educationalSegment: id });
-        if (subjectsCount > 0) {
-            return res.status(400).json(createErrorResponse("Cannot delete segment with associated subjects. Please remove subjects first.", error.message));
-        }
+		// Check if there are any subjects associated with this segment
+		const subjectsCount = await Subject.countDocuments({ educationalSegment: id });
+		if (subjectsCount > 0) {
+			return res.status(400).json(createErrorResponse("Cannot delete segment with associated subjects. Please remove subjects first.", error.message));
+		}
 
-        // Check if there are any classes associated with this segment
-        const classesCount = await Class.countDocuments({ educationalSegments: id });
-        if (classesCount > 0) {
-            return res.status(400).json(createErrorResponse("Cannot delete segment with associated classes. Please remove classes first.", error.message));
-        }
+		// Check if there are any classes associated with this segment
+		const classesCount = await Class.countDocuments({ educationalSegments: id });
+		if (classesCount > 0) {
+			return res.status(400).json(createErrorResponse("Cannot delete segment with associated classes. Please remove classes first.", error.message));
+		}
 
-        // Remove segment from all associated YearLevels
-        await YearLevel.updateMany(
-            { school: schoolId, educationalSegments: id },
-            { $pull: { educationalSegments: id } }
-        );
+		// Remove segment from all associated YearLevels
+		await YearLevel.updateMany(
+			{ school: schoolId, educationalSegments: id },
+			{ $pull: { educationalSegments: id } }
+		);
 
-        await EducationalSegment.findByIdAndDelete(id);
+		await EducationalSegment.findByIdAndDelete(id);
 
-        res.status(200).json({ success: true, message: "Segment deleted successfully", data: { id } });
+		res.status(200).json({ success: true, message: "Segment deleted successfully", data: { id } });
 
-    } catch (error) {
-        logger.error("Error deleting educational segment:", error);
-        res.status(500).json(createErrorResponse("Internal error while deleting segment", error.message));
-    }
+	} catch (error) {
+		logger.error("Error deleting educational segment:", error);
+		res.status(500).json(createErrorResponse("Internal error while deleting segment", error.message));
+	}
 };
 
 // --- Year Level Controller Functions ---
 
 /**
- * List Year Levels (optionally filtered by segment)
+ * List Year Levels
  */
 exports.listYearLevels = async (req, res) => {
-    try {
+	try {
 		const schoolId = req.query.id || req.user?.school;
-		const page = parseInt(req.query.page) || 1;
-		const limit = parseInt(req.query.limit) || 10;
-		const skip = (page - 1) * limit;
-		const order = req.query.order === 'desc' ? -1 : 1;
 		const searchQuery = req.query.search || '';
 		const searchFields = req.query.searchFields ? req.query.searchFields.split(',') : ['name', 'acronym'];
 		const classId = req.query.classId;
-        const segmentId = req.query.segmentId;
+
+		const {
+			page = parseInt(req.query.page) || 1,
+			limit = parseInt(req.query.limit) || 10,
+			sortBy = 'order',
+			order = req.query.order === 'desc' ? -1 : 1
+		} = req.query;
+
+		const skip = (page - 1) * limit;
 
 		if (!schoolId) {
 			return res.status(400).send({ error: 'School ID is required' });
@@ -211,25 +297,41 @@ exports.listYearLevels = async (req, res) => {
 		if (!school)
 			return res.status(404).json(createErrorResponse('School not found'));
 
-        const filter = { school: schoolId };
-		
+		const filter = { school: schoolId, ...(req.query.segment && { educationalSegment: req.query.segment }) };
+
 		if (classId) filter.classes = classId;
 
-		if (req.query.status) filter.status = req.query.status === 'active' ? true : false;
+		if (req.query.status) {
+			if (['active', 'disabled', 'archived'].includes(req.query.status)) {
+				filter.status = req.query.status;
+			} else {
+				return res.status(400).json(createErrorResponse('Invalid status value. Must be one of: active, disabled, archived'));
+			}
+		}
 
 		if (searchQuery)
 			filter.$or = searchFields.map(field => ({
 				[field]: new RegExp(searchQuery, 'i')
 			}));
 
-		const totalCount = await YearLevel.countDocuments(filter);
-		const totalPages = Math.ceil(totalCount / limit);
 
-		const yearLevels = await YearLevel.find(filter)
-		.sort({ [req.query.sortBy || 'name']: order })
-		.skip(skip)
-		.limit(limit)
-		.populate('educationalSegments', 'name acronym type')
+		const [totalCount, yearLevels] = await Promise.all([
+			YearLevel.countDocuments(filter),
+			YearLevel.find(filter)
+				.sort({ [sortBy]: order })
+				.skip(+skip).limit(+limit)
+				.populate('educationalSegment', 'name acronym')
+				.populate({
+					path: 'subjects',
+					select: 'name description',
+					populate: {
+						path: 'employees',
+						select: 'firstName lastName email photo status'
+					}
+				})
+		]);
+
+		const totalPages = Math.ceil(totalCount / limit);
 
 		res.status(200).send({
 			success: true,
@@ -237,7 +339,7 @@ exports.listYearLevels = async (req, res) => {
 				yearLevels,
 				pagination: {
 					currentPage: page,
-					totalPages,
+					totalPages: totalPages,
 					totalItems: totalCount,
 					itemsPerPage: limit,
 					hasNextPage: page < totalPages,
@@ -246,178 +348,249 @@ exports.listYearLevels = async (req, res) => {
 			}
 		});
 
-    } catch (error) {
-        logger.error("Error listing year levels:", error);
+	} catch (error) {
+		logger.error("Error listing year levels:", error);
 		if (error.name === 'CastError')
 			return res.status(400).json(createErrorResponse('Invalid ID format'));
 
-        res.status(500).json(createErrorResponse("Internal server error while fetching year levels", error.message));
-    }
+		res.status(500).json(createErrorResponse("Internal server error while fetching year levels", error.message));
+	}
+};
+
+/**
+ * Get a Year Level
+ */
+exports.getYearLevel = async (req, res) => {
+	try {
+		const schoolId = req.user.school;
+		const yl = await YearLevel.findOne({ _id: req.params.id, school: schoolId })
+			.populate('educationalSegment', 'name acronym')
+			.populate({
+				path: 'subjects',
+				select: 'name description',
+				populate: {
+					path: 'employees',
+					select: 'firstName lastName email photo'
+				}
+			})
+		if (!yl) return createError(res, 404, 'YearLevel not found');
+		return res.json({ success: true, data: yl });
+	} catch (err) {
+		return createError(res, err.name === 'CastError' ? 400 : 500, err.message);
+	}
 };
 
 /**
  * Add a new Year Level
  */
 exports.addYearLevel = async (req, res) => {
-    try {
-        const { educationalSegments, ...data } = req.body;
-        const schoolId = req.user?.school;
-        let validSegmentIds = [];
+	try {
+		const { subjects: subjectsToAdd, educationalSegment, status = 'active', ...data } = req.body;
+		const schoolId = req.user?.school;
+		let validSubjectsIds = [];
 
-        // Validate provided segment IDs if they exist
-        if (educationalSegments && Array.isArray(educationalSegments) && educationalSegments.length > 0) {
-            const segments = await EducationalSegment.find({
-                _id: { $in: educationalSegments },
-                school: schoolId
-            }).select("_id");
+		// Validate status if provided
+		if (status && !['active', 'disabled', 'archived'].includes(status)) {
+			return res.status(400).json(createErrorResponse('Invalid status value. Must be one of: active, disabled, archived'));
+		}
 
-            validSegmentIds = segments.map(s => s._id);
-            if (validSegmentIds.length !== educationalSegments.length) {
-                return res.status(400).json(createErrorResponse("One or more provided Educational Segments are invalid or do not belong to this school"));
-            }
-        }
+		// Validate educational segment
+		if (!educationalSegment) {
+			return res.status(400).json(createErrorResponse("Educational segment is required"));
+		}
 
-        const newYearLevel = new YearLevel({
-            ...data,
-            school: schoolId,
-            educationalSegments: validSegmentIds,
-        });
+		const seg = await EducationalSegment.findOne({ _id: educationalSegment, school: schoolId });
+		if (!seg) {
+			return res.status(400).json(createErrorResponse("Invalid educational segment"));
+		}
 
-        await newYearLevel.save();
+		// Validate subjects if provided
+		if (subjectsToAdd && Array.isArray(subjectsToAdd) && subjectsToAdd.length > 0) {
+			// Validate all subjects exist and belong to the school
+			const subjects = await Subject.find({
+				_id: { $in: subjectsToAdd },
+				school: schoolId
+			}).select("_id");
 
-        // Add year level reference to the associated segments
-        if (validSegmentIds.length > 0) {
-            await EducationalSegment.updateMany(
-                { _id: { $in: validSegmentIds } },
-                { $addToSet: { yearLevels: newYearLevel._id } }
-            );
-        }
+			validSubjectsIds = subjects.map(s => s._id);
+			if (validSubjectsIds.length !== subjectsToAdd.length) {
+				return res.status(400).json(createErrorResponse("One or more provided Subjects are invalid or do not belong to this school"));
+			}
+		}
 
-        const populatedYearLevel = await YearLevel.findById(newYearLevel._id)
-            .populate("educationalSegments", "name acronym")
-            .populate("classes", "name");
+		const newYearLevel = new YearLevel({
+			...data,
+			school: schoolId,
+			educationalSegment: seg._id,
+			subjects: validSubjectsIds,
+			status
+		});
 
-        res.status(201).json({ success: true, message: "Year Level created successfully", data: populatedYearLevel });
+		await newYearLevel.save();
 
-    } catch (error) {
-        logger.error("Error creating year level:", error);
-        if (error.name === "ValidationError" || error.code === 11000) {
-            return res.status(400).json(createErrorResponse("Validation/Duplicate error", error.message));
-        }
-        res.status(500).json(createErrorResponse("Internal error while creating year level", error.message));
-    }
+		const populatedYearLevel = await YearLevel.findById(newYearLevel._id)
+			.populate('educationalSegment', 'name acronym')
+			.populate({
+				path: 'subjects',
+				select: 'name description',
+				populate: {
+					path: 'employees',
+					select: 'firstName lastName email photo'
+				}
+			});
+
+		res.status(201).json({ success: true, message: "Year Level created successfully", data: populatedYearLevel });
+
+	} catch (error) {
+		logger.error("Error creating year level:", error);
+		if (error.name === "ValidationError" || error.code === 11000) {
+			return res.status(400).json(createErrorResponse("Validation/Duplicate error", error.message));
+		}
+		res.status(500).json(createErrorResponse("Internal error while creating year level", error.message));
+	}
 };
 
 /**
  * Update a Year Level
  */
 exports.updateYearLevel = async (req, res) => {
-    try {
-        const updates = req.body;
-        const schoolId = req.user?.school;
-        const yearLevelId = updates._id;
+	try {
+		const updates = req.body;
+		const schoolId = req.user?.school;
+		const yearLevelId = req.params.id;
 
-        if (!yearLevelId) {
-            return res.status(400).json(createErrorResponse("Year Level ID is required for update"));
-        }
+		if (!yearLevelId) {
+			return res.status(400).json(createErrorResponse("Year Level ID is required for update"));
+		}
 
-        const yearLevelToUpdate = await YearLevel.findOne({ _id: yearLevelId, school: schoolId });
-        if (!yearLevelToUpdate) {
-            return res.status(404).json(createErrorResponse("Year Level not found or does not belong to this school"));
-        }
+		const yearLevelToUpdate = await YearLevel.findOne({ _id: yearLevelId, school: schoolId });
+		if (!yearLevelToUpdate) {
+			return res.status(404).json(createErrorResponse("Year Level not found or does not belong to this school"));
+		}
 
-        delete updates.school;
-        delete updates.classes; // Prevent direct manipulation of classes array here
+		// Validate status if provided
+		if (updates.status && !['active', 'disabled', 'archived'].includes(updates.status)) {
+			return res.status(400).json(createErrorResponse('Invalid status value. Must be one of: active, disabled, archived'));
+		}
 
-        // Handle educationalSegments updates if provided
-        if (updates.educationalSegments) {
-            // Validate all new segments exist and belong to the school
-            const newSegments = await EducationalSegment.find({
-                _id: { $in: updates.educationalSegments },
-                school: schoolId
-            });
+		// prevent segment change (or re-validate if you allow)
+		delete updates.school;
+		delete updates.educationalSegment;
 
-            if (newSegments.length !== updates.educationalSegments.length) {
-                return res.status(400).json(createErrorResponse("One or more provided Educational Segments are invalid or do not belong to this school"));
-            }
+		// re-validate subjects if present
+		if (Array.isArray(updates.subjects)) {
+			const validSubs = await Subject.find({
+				_id: { $in: updates.subjects },
+				school: schoolId
+			}).select('_id');
+			updates.subjects = validSubs.map(s => s._id);
+		}
 
-            // Get current segments to compare
-            const currentSegments = yearLevelToUpdate.educationalSegments.map(id => id.toString());
-            const newSegmentIds = updates.educationalSegments.map(id => id.toString());
+		const updatedYearLevel = await YearLevel.findByIdAndUpdate(
+			yearLevelId,
+			{ $set: updates },
+			{ new: true, runValidators: true }
+		)
+			.populate({
+				path: 'subjects',
+				select: 'name description',
+				populate: {
+					path: 'employees',
+					select: 'name email photo'
+				}
+			});
 
-            // Find segments to add and remove
-            const segmentsToAdd = newSegmentIds.filter(id => !currentSegments.includes(id));
-            const segmentsToRemove = currentSegments.filter(id => !newSegmentIds.includes(id));
+		res.status(200).json({ success: true, message: "Year Level updated successfully", data: updatedYearLevel });
 
-            // Add year level to new segments
-            if (segmentsToAdd.length > 0) {
-                await EducationalSegment.updateMany(
-                    { _id: { $in: segmentsToAdd } },
-                    { $addToSet: { yearLevels: yearLevelId } }
-                );
-            }
-
-            // Remove year level from old segments
-            if (segmentsToRemove.length > 0) {
-                await EducationalSegment.updateMany(
-                    { _id: { $in: segmentsToRemove } },
-                    { $pull: { yearLevels: yearLevelId } }
-                );
-            }
-        }
-
-        const updatedYearLevel = await YearLevel.findByIdAndUpdate(
-            yearLevelId,
-            { $set: updates },
-            { new: true, runValidators: true }
-        )
-            .populate("educationalSegments", "name acronym")
-            .populate("classes", "name");
-
-        res.status(200).json({ success: true, message: "Year Level updated successfully", data: updatedYearLevel });
-
-    } catch (error) {
-        logger.error("Error updating year level:", error);
-        if (error.name === "ValidationError" || error.code === 11000) {
-            return res.status(400).json(createErrorResponse("Validation/Duplicate error", error.message));
-        }
-        res.status(500).json(createErrorResponse("Internal error while updating year level", error.message));
-    }
+	} catch (error) {
+		logger.error("Error updating year level:", error);
+		if (error.name === "ValidationError" || error.code === 11000) {
+			return res.status(400).json(createErrorResponse("Validation/Duplicate error", error.message));
+		}
+		res.status(500).json(createErrorResponse("Internal error while updating year level", error.message));
+	}
 };
 
 /**
  * Delete a Year Level
  */
 exports.deleteYearLevel = async (req, res) => {
-    try {
-        const { id } = req.params;
-        const schoolId = req.user?.school;
+	try {
+		const { id } = req.params;
+		const schoolId = req.user?.school;
 
-        const yearLevelToDelete = await YearLevel.findOne({ _id: id, school: schoolId });
+		const yearLevelToDelete = await YearLevel.findOne({ _id: id, school: schoolId });
 
-        if (!yearLevelToDelete) {
-            return res.status(404).json(createErrorResponse("Year Level not found or does not belong to this school"));
-        }
+		if (!yearLevelToDelete) {
+			return res.status(404).json(createErrorResponse("Year Level not found or does not belong to this school"));
+		}
 
-        // Check if year level has classes before deleting
-        if (yearLevelToDelete.classes && yearLevelToDelete.classes.length > 0) {
-            return res.status(400).json(createErrorResponse("Cannot delete year level with associated classes. Please remove classes first."));
-        }
+		// Get affected classes with basic information
+		const affectedClasses = await Class.find({ yearLevel: id, school: schoolId })
+			.select('name academicYear startDate endDate')
+			.populate('academicYear', 'year title');
 
-        // Remove year level reference from all associated segments
-        if (yearLevelToDelete.educationalSegments && yearLevelToDelete.educationalSegments.length > 0) {
-            await EducationalSegment.updateMany(
-                { _id: { $in: yearLevelToDelete.educationalSegments } },
-                { $pull: { yearLevels: id } }
-            );
-        }
+		if (affectedClasses.length > 0) {
 
-        await YearLevel.findByIdAndDelete(id);
+			const errorMessage = {
+				details: {
+					yearLevelName: yearLevelToDelete.name,
+					affectedClassesCount: affectedClasses.length,
+					affectedClasses: affectedClasses.map(cls => ({
+						name: cls.name,
+						academicYear: cls.academicYear ? {
+							year: cls.academicYear.year,
+							title: cls.academicYear.title
+						} : null,
+						period: `${new Date(cls.startDate).getFullYear()} - ${new Date(cls.endDate).getFullYear()}`
+					}))
+				},
+				suggestions: [
+					"Remove or reassign all classes using this year level before deletion",
+					"Consider archiving this year level instead of deletion to maintain historical data"
+				]
+			}
 
-        res.status(200).json({ success: true, message: "Year Level deleted successfully", data: { id } });
+			return res.status(400).json(createErrorResponse("Cannot delete Year Level with associated Classes", errorMessage));
 
-    } catch (error) {
-        logger.error("Error deleting year level:", error);
-        res.status(500).json(createErrorResponse("Internal error while deleting year level"));
-    }
+			// return res.status(400).json({
+			// 	success: false,
+			// 	error: {
+			// 		message: "Cannot delete Year Level with associated Classes",
+			// 		details: {
+			// 			yearLevelName: yearLevelToDelete.name,
+			// 			affectedClassesCount: affectedClasses.length,
+			// 			affectedClasses: affectedClasses.map(cls => ({
+			// 				name: cls.name,
+			// 				academicYear: cls.academicYear ? {
+			// 					year: cls.academicYear.year,
+			// 					title: cls.academicYear.title
+			// 				} : null,
+			// 				period: `${new Date(cls.startDate).getFullYear()} - ${new Date(cls.endDate).getFullYear()}`
+			// 			}))
+			// 		},
+			// 		suggestions: [
+			// 			"Remove or reassign all classes using this year level before deletion",
+			// 			"Consider archiving this year level instead of deletion to maintain historical data"
+			// 		]
+			// 	}
+			// });
+		}
+
+		await YearLevel.findByIdAndDelete(id);
+
+		res.status(200).json({ 
+			success: true, 
+			message: "Year Level deleted successfully", 
+			data: { 
+				id,
+				name: yearLevelToDelete.name,
+				acronym: yearLevelToDelete.acronym
+			} 
+		});
+
+	} catch (error) {
+		logger.error("Error deleting year level:", error);
+		res.status(500).json(createErrorResponse("Internal error while deleting year level"));
+	}
 };

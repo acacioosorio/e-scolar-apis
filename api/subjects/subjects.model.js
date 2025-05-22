@@ -1,6 +1,8 @@
+// Subjects Model
+// ./api/subjects/subjects.model.js
+
 const mongoose = require('mongoose');
 const Schema = mongoose.Schema;
-const bcrypt = require('bcryptjs');
 mongoose.Promise = global.Promise;
 
 const SubjectSchema = new Schema(
@@ -10,17 +12,34 @@ const SubjectSchema = new Schema(
 			ref: "School",
 			required: [true, "School is required"],
 		},
-		educationalSegment: {
-			type: Schema.Types.ObjectId,
-			ref: "EducationalSegment",
+		// Ex: "Matemática", "Português", "Inglês"
+		name: {
+			type: String,
+			required: [true, "Please add a Subject name"],
 		},
-		classes: [
-			{
-				type: Schema.Types.ObjectId,
-				ref: "Classes",
-				required: true,
-			},
-		],
+		code: {
+			type: String,
+		},
+		academicYear: {
+			type: Schema.Types.ObjectId,
+			ref: "AcademicYear",
+			required: true,
+			required: [true, "Academic year is required"],
+		},
+		yearLevel: {
+			type: Schema.Types.ObjectId,
+			ref: 'YearLevel',
+			required: [true, 'Year Level is required'],
+		},
+		classes: [{
+			type: Schema.Types.ObjectId,
+			ref: 'Classes'
+		}],
+		type: {
+			type: String,
+			enum: ['mandatory', 'complementary', 'elective'],
+			required: [true, "Please add a Subject type"],
+		},
 		employees: [
 			{
 				type: Schema.Types.ObjectId,
@@ -28,13 +47,52 @@ const SubjectSchema = new Schema(
 				required: true,
 			},
 		],
-		name: {
+		status: {
 			type: String,
-			required: [true, "Please add a Subject name"],
+			enum: ['active', 'inactive', 'archived'],
+			default: 'active',
 		},
 		description: String,
+
+		// Novos campos
+		// Carga horária total da disciplina (em horas)
+		workload: {
+			type: Number,
+			required: [true, "A carga horária é obrigatória"],
+			min: 0
+		},
+
+		// Créditos acadêmicos
+		credits: {
+			type: Number,
+			required: [true, "O número de créditos é obrigatório"],
+			min: 0
+		},
+
+		// Média mínima para aprovação
+		minGradeToPass: {
+			type: Number,
+			default: 6.0, // Valor padrão, ajuste conforme sua necessidade
+			min: 0,
+			max: 10
+		},
+
+		// Pré-requisitos: disciplinas que devem ser cursadas antes
+		prerequisites: [{
+			subject: {
+				type: Schema.Types.ObjectId,
+				ref: 'Subjects'
+			},
+			minGrade: {
+				type: Number,
+				default: 6.0 // Nota mínima no pré-requisito
+			}
+		}],
 	},
 	{ timestamps: true }
 );
+
+// Índices existentes
+SubjectSchema.index({ school: 1, academicYear: 1, yearLevel: 1, code: 1 }, { unique: true });
 
 module.exports = mongoose.models.Subjects || mongoose.model('Subjects', SubjectSchema);

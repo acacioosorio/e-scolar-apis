@@ -1,3 +1,6 @@
+// Backoffice Router
+// ./api/backoffice/index.js
+
 'use strict';
 
 const express = require('express');

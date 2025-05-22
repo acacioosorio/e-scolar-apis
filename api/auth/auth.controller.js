@@ -153,7 +153,7 @@ exports.schoolSignin = async (req, res) => {
 					firstName: user.firstName,
 					lastName: user.lastName,
 					email: user.email,
-					role: user.role,
+					subRole: user.subRole,
 				},
 			});
 		});
@@ -273,9 +273,17 @@ exports.validation = async (req, res) => {
 			}
 		}
 
-		return res.status(200).json({
-			message: 'Conta validada e senha definida com sucesso.',
-			email: updatedUser.email
+		// return res.status(200).json({
+		// 	message: 'Conta validada e senha definida com sucesso.',
+		// 	email: updatedUser.email
+		// });
+		
+		res.status(200).send({
+			success: true,
+			data: {
+				message: 'Account validated and password set successfully.',
+				email: updatedUser.email
+			}
 		});
 
 	} catch (error) {

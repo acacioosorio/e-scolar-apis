@@ -1,3 +1,6 @@
+// School Router
+// ./api/schools/index.js
+
 'use strict';
 
 const express = require('express');
@@ -34,16 +37,10 @@ router.get('/stats', passport.authenticate('jwt-user', { session: false }), auth
 router.get('/employees', passport.authenticate('jwt-user', { session: false }), authorizeRoles('backoffice', 'school'), authorizeSubRoles('admin', 'staff'), controller.listEmployees);
 router.post('/employees', passport.authenticate('jwt-user', { session: false }), authorizeRoles('backoffice', 'school'), authorizeSubRoles('admin'), controller.addEmployee);
 router.patch('/employees/:id/status', passport.authenticate('jwt-user', { session: false }), authorizeRoles('backoffice', 'school'), authorizeSubRoles('admin'), controller.updateEmployeeStatus);
-router.put('/employees/', passport.authenticate('jwt-user', { session: false }), authorizeRoles('backoffice', 'school'), authorizeSubRoles('admin'), controller.updateEmployee);
+router.put('/employees/:id', passport.authenticate('jwt-user', { session: false }), authorizeRoles('backoffice', 'school'), authorizeSubRoles('admin'), controller.updateEmployee);
+// /api/schools/employees/68226c0b273f93294abfa02f
 router.post('/employees/:id/resend-activation', passport.authenticate('jwt-user', { session: false }), authorizeRoles('backoffice', 'school'), authorizeSubRoles('admin', 'staff'), controller.resendUserActivation);
 router.delete('/employees/:id', passport.authenticate('jwt-user', { session: false }), authorizeRoles('backoffice', 'school'), authorizeSubRoles('admin'), controller.deleteEmployee);
-/**
- * Segments, Year Levels and stuff
- */
-// router.get('/educational-segment', passport.authenticate('jwt-employee', { session: false }), authorizeRoles('backoffice', 'school'), authorizeSubRoles('staff'), controller.listSegments);
-// router.post('/educational-segment', passport.authenticate('jwt-employee', { session: false }), authorizeRoles('backoffice', 'school'), authorizeSubRoles('staff'), controller.createSegment);
-// router.put('/educational-segment', passport.authenticate('jwt-employee', { session: false }), authorizeRoles('backoffice', 'school'), authorizeSubRoles('staff'), controller.updateSegment);
-// router.delete('/educational-segment', passport.authenticate('jwt-employee', { session: false }), authorizeRoles('backoffice', 'school'), authorizeSubRoles('staff'), controller.listEmployees);
 
 // router.get('/employees-test', controller.listEmployees);
 

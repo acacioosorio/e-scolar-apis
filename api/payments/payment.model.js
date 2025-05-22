@@ -1,3 +1,6 @@
+// Payment Model
+// ./api/payments/payment.model.js
+
 const mongoose = require("mongoose");
 const Schema = mongoose.Schema;
 

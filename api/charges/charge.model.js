@@ -1,3 +1,6 @@
+// Charge Model
+// ./api/charges/charge.model.js
+
 const mongoose = require("mongoose");
 const Schema = mongoose.Schema;
 

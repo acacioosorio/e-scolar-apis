@@ -1,3 +1,6 @@
+// School Controller
+// ./api/schools/school.controller.js
+
 const AWS = require('aws-sdk');
 const Jimp = require("jimp");
 const multer = require('multer');
@@ -128,9 +131,10 @@ exports.listEmployees = async (req, res, next) => {
 			filter.subRole = req.query.subRole;
 		}
 
-		// Add status filter if provided
+		// Add status filter if provided - now supports multiple statuses
 		if (req.query.status) {
-			filter.status = req.query.status;
+			const statuses = req.query.status.split(',');
+			filter.status = { $in: statuses };
 		}
 
 		// Add search conditions if search query exists
@@ -201,7 +205,7 @@ exports.addEmployee = async (req, res, next) => {
 				hash: validationHash,
 				hashExpiration: expirationDate
 			},
-			active: false,
+			status: 'pending',
 			school: schoolId
 		});
 
@@ -379,10 +383,12 @@ exports.updateEmployeeStatus = async (req, res) => {
 		const { status } = req.body;
 		const schoolId = req.user?.school;
 
-		if (typeof status !== 'boolean') {
+		console.log("updateEmployeeStatus req.body", req.body);
+
+		if (typeof status !== 'string' || !['active', 'inactive', 'pending', 'archived'].includes(status)) {
 			return res.status(400).json({
 				success: false,
-				message: 'Status must be a boolean value (true/false)'
+				message: 'Status must be one of: active, inactive, pending, archived'
 			});
 		}
 
@@ -397,25 +403,25 @@ exports.updateEmployeeStatus = async (req, res) => {
 		}
 
 		// Update user status
-		user.active = status;
-		if (!status) {
+		user.status = status;
+		if (status === 'inactive' || status === 'archived') {
 			// If deactivating user, clear validation hash
 			user.validateHash = {
 				hash: null,
 				hashExpiration: null
 			};
 		}
-		await user.save();
 
-		// Get the calculated status
-		const calculatedStatus = user.status;
+		const updatedUser = await Users.findByIdAndUpdate(
+			id,
+			{ $set: { status: status } },
+			{ new: true }
+		)
 
 		res.json({
 			success: true,
-			data: {
-				message: `Collaborator status updated to ${calculatedStatus}`,
-				status: calculatedStatus
-			}
+			message: 'User updated successfully',
+			data: updatedUser
 		});
 
 	} catch (error) {
@@ -430,25 +436,25 @@ exports.updateEmployeeStatus = async (req, res) => {
  * @param {Object} res - Express response object
  */
 exports.updateEmployee = async (req, res) => {
+	console.log(req.body);
 	try {
+		const { id } = req.params;
 		const updates = req.body;
 		const schoolId = req.user?.school;
 
-		console.log("updateEmployee body", req.body);
-
 		// Fields that cannot be updated
-		const restrictedFields = ['password', 'role', 'school', 'validateHash', 'active'];
+		const restrictedFields = ['password', 'role', 'school', 'validateHash', 'status'];
 		restrictedFields.forEach(field => delete updates[field]);
 
 		// Find the user and check if they belong to the school
-		const user = await Users.findOne({ _id: updates._id, school: schoolId });
+		const user = await Users.findOne({ _id: id, school: schoolId });
 		if (!user) {
 			return res.status(404).json(createErrorResponse('User not found or does not belong to this school'));
 		}
 
 		// Update user information
 		const updatedUser = await Users.findByIdAndUpdate(
-			updates._id,
+			id,
 			{ $set: updates },
 			{ 
 				new: true,
@@ -562,7 +568,7 @@ exports.resendUserActivation = async (req, res) => {
 		}
 
 		// Check if user is already active
-		if (user.active && !user.validateHash.hash) {
+		if (user.status === 'active' && !user.validateHash.hash) {
 			return res.status(400).json(createErrorResponse('Usuário já está ativo'));
 		}
 

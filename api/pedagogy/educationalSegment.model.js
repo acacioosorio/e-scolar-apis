@@ -1,3 +1,6 @@
+// Educational Segment Model
+// ./api/pedagogy/educationalSegment.model.js
+
 const mongoose = require("mongoose");
 const Schema = mongoose.Schema;
 
@@ -13,6 +16,7 @@ const EducationalSegmentSchema = new Schema(
 			required: [true, "School is required"],
 			index: true,
 		},
+		// Ex: "Educação Infantil", "Ensino Fundamental Anos Iniciais", "Ensino Médio"
 		name: {
 			type: String,
 			required: [true, "Segment name is required"],
@@ -26,47 +30,27 @@ const EducationalSegmentSchema = new Schema(
 			uppercase: true,
 			maxLength: 5,
 		},
-		// Type of segment (e.g., normal, grouping, elective) - Matches frontend
-		type: {
-			type: String,
-			required: [true, "Segment type is required"],
-			enum: ["normal", "grouping", "elective"],
-			default: "normal",
-		},
+		// General order for display purposes (independent of segment)
+        order: {
+            type: Number,
+            default: 0,
+        },
 		// Optional description or comments
-		comments: {
+		description: {
 			type: String,
 			trim: true,
 		},
-		// Order for display purposes
-		order: {
-			type: Number,
-			default: 0,
+		status: {
+			type: String,
+			enum: ['active', 'inactive', 'archived'],
+			default: 'active',
+			required: true
 		},
-		active: {
-			type: Boolean,
-			default: true,
-		},
-		// Array of Year Levels belonging to this segment
-		yearLevels: [
-			{
-				type: Schema.Types.ObjectId,
-				ref: "YearLevel",
-			},
-		],
-		// Array of Subjects belonging to this segment
-		subjects: [
-			{
-				type: Schema.Types.ObjectId,
-				ref: "Subjects",
-			},
-		],
 	},
 	{ timestamps: true }
 );
 
 // Ensure unique combination of school and name/acronym
-EducationalSegmentSchema.index({ school: 1, name: 1 }, { unique: true });
-EducationalSegmentSchema.index({ school: 1, acronym: 1 }, { unique: true });
+EducationalSegmentSchema.index( { school: 1, name: 1, acronym: 1 }, { unique: true });
 
 module.exports = mongoose.models.EducationalSegment || mongoose.model("EducationalSegment", EducationalSegmentSchema);

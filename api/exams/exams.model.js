@@ -1,3 +1,6 @@
+// Exams Model
+// ./api/exams/exams.model.js
+
 const mongoose = require('mongoose');
 const Schema = mongoose.Schema;
 const bcrypt = require('bcryptjs');

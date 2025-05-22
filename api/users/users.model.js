@@ -1,3 +1,6 @@
+// Users Model
+// ./api/users/users.model.js
+
 const mongoose = require('mongoose');
 const Schema = mongoose.Schema;
 const bcrypt = require('bcryptjs');
@@ -6,11 +9,11 @@ mongoose.Promise = global.Promise;
 const UsersSchema = new Schema({
 	firstName: {
 		type: String,
-		required: true
+		required: [true, "First name is required"],
 	},
 	lastName: {
 		type: String,
-		required: true
+		required: [true, "Last name is required"],
 	},
 	email: {
 		type: String,
@@ -80,8 +83,12 @@ const UsersSchema = new Schema({
 	},
 	status: {
 		type: String,
-		enum: ['active', 'inactive', 'pending'],
+		enum: ['active', 'inactive', 'pending', 'archived'],
 		default: 'pending'
+	},
+	lastLogin: {
+		type: Date,
+		default: null,
 	},
 	validateHash: {
 		hash: {
@@ -103,10 +110,11 @@ const UsersSchema = new Schema({
 
 UsersSchema.pre('save', async function (next) {
 	// Update status based on active and validateHash
-
 	console.log(this.active, this.validateHash?.hash);
 
-	if (this.active === true && this.validateHash?.hash === null) {
+	if (this.status === 'archived') {
+		this.active = false;
+	} else if (this.active === true && this.validateHash?.hash === null) {
 		this.status = 'active';
 	} else if (this.active === false && this.validateHash?.hash !== null) {
 		this.status = 'pending';
@@ -147,5 +155,8 @@ UsersSchema.virtual('validationPending').get(function () {
 // Make sure virtuals are included in JSON and Object conversions
 UsersSchema.set('toJSON', { virtuals: true });
 UsersSchema.set('toObject', { virtuals: true });
+
+UsersSchema.index({ email: 1 }, { unique: true });
+UsersSchema.index({ school: 1, role: 1, subRole: 1 }, { unique: true });
 
 module.exports = mongoose.models.Users || mongoose.model('Users', UsersSchema);

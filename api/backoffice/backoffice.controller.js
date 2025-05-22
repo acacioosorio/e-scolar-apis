@@ -1,3 +1,6 @@
+// Backoffice Controller
+// ./api/backoffice/backoffice.controller.js
+
 const slugify = require('slugify');
 const { randomUUID } = require('crypto');
 

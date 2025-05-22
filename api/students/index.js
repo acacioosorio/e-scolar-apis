@@ -1,3 +1,6 @@
+// Students Router
+// ./api/students/index.js
+
 'use strict';
 
 const express = require('express');
@@ -66,19 +69,11 @@ router.delete(
 );
 
 router.patch(
-    '/:studentId/activate',
+    '/:studentId/status',
     passport.authenticate('jwt-user', { session: false }),
     authorizeRoles('backoffice', 'school'),
     authorizeSubRoles('admin', 'staff'),
-    controller.activateStudent
-);
-
-router.patch(
-    '/:studentId/deactivate',
-    passport.authenticate('jwt-user', { session: false }),
-    authorizeRoles('backoffice', 'school'),
-    authorizeSubRoles('admin', 'staff'),
-    controller.deactivateStudent
+    controller.updateStudentStatus
 );
 
 module.exports = router;

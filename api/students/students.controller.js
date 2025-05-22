@@ -1,3 +1,6 @@
+// Students Controller
+// ./api/students/students.controller.js
+
 const { randomUUID } = require("crypto");
 const Student = require("./students.model");
 const School = require("../schools/school.model");
@@ -28,6 +31,7 @@ exports.listStudents = async (req, res) => {
 			? req.query.searchFields.split(",")
 			: ["name"];
 		const classId = req.query.classId;
+		const status = req.query.status; // Add status filter
 
 		if (!schoolId)
 			return res.status(400).json(createErrorResponse("School ID is required"));
@@ -59,7 +63,9 @@ exports.listStudents = async (req, res) => {
 		}
 
 		// Add status filter if provided
-		if (req.query.status) filter.status = req.query.status;
+		if (status) {
+			filter.status = status;
+		}
 
 		// Add search conditions if search query exists
 		if (searchQuery) {
@@ -272,8 +278,7 @@ exports.addStudent = async (req, res) => {
 		const newStudent = new Student({
 			...data,
 			school: schoolId,
-			active: true,
-			status: "active", // Students are active by default
+			status: data.status || 'active',
 		});
 
 		// Save student [OK]
@@ -322,6 +327,7 @@ exports.addStudent = async (req, res) => {
 				lastName: newStudent.lastName,
 				email: newStudent.email,
 				photo: newStudent.photo,
+				status: newStudent.status,
 				classes: studentClasses.map((c) => ({
 					id: c._id,
 					name: c.name,
@@ -350,7 +356,7 @@ exports.updateStudent = async (req, res) => {
 		const schoolId = req.user?.school;
 
 		// Fields that cannot be updated
-		const restrictedFields = ["school", "status"];
+		const restrictedFields = ["school"];
 		restrictedFields.forEach((field) => delete updates[field]);
 
 		// Find the student and check if they belong to the school
@@ -648,69 +654,42 @@ exports.unlinkResponsibles = async (req, res) => {
 };
 
 /**
- * Activate a student's record
+ * Update student status
  */
-exports.activateStudent = async (req, res) => {
-    try {
-        const { studentId } = req.params;
-        const schoolId = req.user?.school;
+exports.updateStudentStatus = async (req, res) => {
+	try {
+		const { studentId } = req.params;
+		const { status } = req.body;
+		const schoolId = req.user?.school;
 
-        const updatedStudent = await Student.findOneAndUpdate(
-            { _id: studentId, school: schoolId },
-            { $set: { active: true } }, // Set active to true
-            { new: true, select: '_id name active' } // Return only relevant fields
-        );
+		console.log(studentId);
+		console.log(req.body);
 
-        if (!updatedStudent) {
-            return res.status(404).json(createErrorResponse('Student not found or does not belong to your school'));
-        }
+		// Validate status
+		if (!['active', 'inactive', 'archived'].includes(status)) {
+			return res.status(400).json(createErrorResponse('Invalid status value. Must be one of: active, inactive, archived'));
+		}
 
-        res.status(200).json({
-            success: true,
-            message: 'Student activated successfully',
-            data: updatedStudent
-        });
+		const updatedStudent = await Student.findOneAndUpdate(
+			{ _id: studentId, school: schoolId },
+			{ $set: { status } },
+			{ new: true, select: '_id name status' }
+		);
 
-    } catch (error) {
-        logger.error('Error activating student:', error);
-        if (error.name === 'CastError') {
-            return res.status(400).json(createErrorResponse('Invalid student ID format'));
-        }
-        res.status(500).json(createErrorResponse('Internal server error while activating student'));
-    }
-};
+		if (!updatedStudent) {
+			return res.status(404).json(createErrorResponse('Student not found or does not belong to your school'));
+		}
 
-/**
- * Deactivate a student's record
- */
-exports.deactivateStudent = async (req, res) => {
-    try {
-        const { studentId } = req.params;
-        const schoolId = req.user?.school;
-        // Optionally, allow a reason in the request body: const { reason } = req.body;
+		res.status(200).send({
+			success: true,
+			data: updatedStudent
+		});
 
-        const updatedStudent = await Student.findOneAndUpdate(
-            { _id: studentId, school: schoolId },
-            { $set: { active: false } }, // Set active to false
-            // Optionally add reason: { $set: { active: false, deactivationReason: reason } } Requires adding field to model
-            { new: true, select: '_id name active' } // Return only relevant fields
-        );
-
-        if (!updatedStudent) {
-            return res.status(404).json(createErrorResponse('Student not found or does not belong to your school'));
-        }
-
-        res.status(200).json({
-            success: true,
-            message: 'Student deactivated successfully',
-            data: updatedStudent
-        });
-
-    } catch (error) {
-        logger.error('Error deactivating student:', error);
-        if (error.name === 'CastError') {
-            return res.status(400).json(createErrorResponse('Invalid student ID format'));
-        }
-        res.status(500).json(createErrorResponse('Internal server error while deactivating student'));
-    }
+	} catch (error) {
+		logger.error('Error updating student status:', error);
+		if (error.name === 'CastError') {
+			return res.status(400).json(createErrorResponse('Invalid student ID format'));
+		}
+		res.status(500).json(createErrorResponse('Internal server error while updating student status', error));
+	}
 };

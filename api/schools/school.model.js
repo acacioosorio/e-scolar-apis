@@ -1,3 +1,6 @@
+// School Model
+// ./api/schools/school.model.js
+
 const mongoose = require('mongoose');
 const Schema = mongoose.Schema;
 const bcrypt = require('bcryptjs');
@@ -48,6 +51,10 @@ const SchoolSchema = new Schema({
 		trim: true,
 		required: [true, "Please add a School Name"],
 	},
+	code: {
+		type: String,
+		unique: [true, "School Code already Exists"],
+	},
 	slug: String,
 	CNPJ: {
 		type: String,
@@ -61,6 +68,10 @@ const SchoolSchema = new Schema({
 		trim: true,
 		required: [true, "Please add an Email"],
 	},
+	website: {
+		type: String,
+		trim: true,
+	},
 	telephone: {
 		type: String,
 		trim: true,
@@ -69,6 +80,11 @@ const SchoolSchema = new Schema({
 			/^(?:(?:\+|00)?(55)\s?)?(?:\(?([1-9][0-9])\)?\s?)(?:((?:9\d|[2-9])\d{3})\-?(\d{4}))$/,
 			"Please add a valid Phone Number",
 		],
+	},
+	academicYear: {
+		type: Schema.Types.ObjectId,
+		ref: "AcademicYear",
+		required: [true, "Academic Year is required"],
 	},
 	students: [{ type: Schema.Types.ObjectId, ref: "Student" }],
 	employees: [{ type: Schema.Types.ObjectId, ref: "Users" }],
