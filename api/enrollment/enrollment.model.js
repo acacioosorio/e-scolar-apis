@@ -21,11 +21,7 @@ const EnrollmentSchema = new Schema({
 		ref: "Classes",
 		required: [true, "Please add a class"],
 	},
-	academicYear: {
-		type: Schema.Types.ObjectId,
-		ref: "AcademicYear",
-		required: [true, "Please add a academic year"],
-	},
+	// Removido academicYear direto, será obtido através da classe
 	enrollmentDate: { type: Date, required: true },
 	rollNumber: { type: String },
 	status: {
@@ -49,7 +45,6 @@ EnrollmentSchema.index({ student: 1, class: 1 }, { unique: true });
 // Adicionando índices para performance
 EnrollmentSchema.index({ class: 1 });
 EnrollmentSchema.index({ student: 1 });
-EnrollmentSchema.index({ academicYear: 1 });
 EnrollmentSchema.index({ school: 1 });
 
 module.exports = mongoose.model("Enrollment", EnrollmentSchema);

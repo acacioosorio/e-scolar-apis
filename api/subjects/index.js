@@ -11,7 +11,7 @@ const { authorizeRoles, authorizeSubRoles } = require('../../middleware/auth');
 const { auditCreate, auditUpdate, auditDelete } = require('../../middleware/audit.middleware');
 const Subjects = require('./subjects.model');
 
-// Subjects management routes
+// Listar disciplinas com filtros e paginação
 router.get('/',
 	passport.authenticate('jwt-user', { session: false }),
 	authorizeRoles('backoffice', 'school'),
@@ -19,6 +19,7 @@ router.get('/',
 	controller.listSubjects
 );
 
+// Obter detalhes de uma disciplina específica
 router.get('/:id',
 	passport.authenticate('jwt-user', { session: false }),
 	authorizeRoles('backoffice', 'school'),
@@ -26,6 +27,7 @@ router.get('/:id',
 	controller.getSubject
 );
 
+// Criar uma nova disciplina
 router.post('/',
 	passport.authenticate('jwt-user', { session: false }),
 	authorizeRoles('backoffice', 'school'),
@@ -34,6 +36,7 @@ router.post('/',
 	controller.createSubject
 );
 
+// Atualizar uma disciplina existente
 router.put('/:id',
 	passport.authenticate('jwt-user', { session: false }),
 	authorizeRoles('backoffice', 'school'),
@@ -42,6 +45,7 @@ router.put('/:id',
 	controller.updateSubject
 );
 
+// Excluir uma disciplina
 router.delete('/:id',
 	passport.authenticate('jwt-user', { session: false }),
 	authorizeRoles('backoffice', 'school'),
@@ -50,7 +54,7 @@ router.delete('/:id',
 	controller.deleteSubject
 );
 
-// Rotas para funcionalidades específicas
+// Verificar pré-requisitos para um aluno
 router.get('/:subjectId/prerequisites/:studentId',
 	passport.authenticate('jwt-user', { session: false }),
 	authorizeRoles('backoffice', 'school'),
@@ -58,6 +62,7 @@ router.get('/:subjectId/prerequisites/:studentId',
 	controller.checkPrerequisites
 );
 
+// Verificar aprovação de um aluno em uma disciplina
 router.get('/:subjectId/approval/:studentId',
 	passport.authenticate('jwt-user', { session: false }),
 	authorizeRoles('backoffice', 'school'),
@@ -65,6 +70,7 @@ router.get('/:subjectId/approval/:studentId',
 	controller.checkApproval
 );
 
+// Buscar disciplinas por tipo para um determinado nível e ano acadêmico
 router.get('/type/:type/year-level/:yearLevelId/academic-year/:academicYearId',
 	passport.authenticate('jwt-user', { session: false }),
 	authorizeRoles('backoffice', 'school'),
@@ -72,11 +78,21 @@ router.get('/type/:type/year-level/:yearLevelId/academic-year/:academicYearId',
 	controller.findByTypeAndLevel
 );
 
+// Buscar estatísticas de aprovação por disciplina
 router.get('/:subjectId/approval-stats',
 	passport.authenticate('jwt-user', { session: false }),
 	authorizeRoles('backoffice', 'school'),
 	authorizeSubRoles('admin', 'staff', 'teacher'),
 	controller.getApprovalStats
+);
+
+// Atualizar o status de uma disciplina
+router.patch('/:id/status',
+	passport.authenticate('jwt-user', { session: false }),
+	authorizeRoles('backoffice', 'school'),
+	authorizeSubRoles('admin'),
+	auditUpdate('Subjects', Subjects),
+	controller.updateStatus
 );
 
 module.exports = router;

@@ -1,13 +1,11 @@
 // Enrollment Controller
 // ./api/enrollment/enrollment.controller.js
 
-const School = require("../schools/school.model");
-const Student = require("../students/students.model");
-const Classes = require("../classes/classes.model");
-const YearLevel = require("../pedagogy/yearLevel.model");
 const Enrollment = require('./enrollment.model');
-const AcademicYear = require('../academic-years/academicYear.model');
+const Classes = require('../classes/classes.model');
+const Student = require('../students/students.model');
 const Subjects = require('../subjects/subjects.model');
+const YearLevel = require('../pedagogy/yearLevel.model');
 const Marks = require('../marks/marks.model');
 const { createErrorResponse } = require('../../helpers');
 
@@ -31,92 +29,147 @@ exports.listEnrollments = async (req, res, next) => {
 			return res.status(400).json(createErrorResponse('School ID is required'));
 		}
 
-		if (req.user && req.user.school.toString() !== schoolId.toString() && req.user.role !== 'master')
-			return res.status(403).json(createErrorResponse('Not authorized to view enrollments from this school'));
-
-		const school = await School.findById(schoolId);
-
-		if (!school)
-			return res.status(404).json(createErrorResponse('School not found'));
-
 		const filter = { school: schoolId };
 
-		// Filtros adicionais
+		// Filtros diretos
+		if (req.query.student) filter.student = req.query.student;
+		if (req.query.class) filter.class = req.query.class;
 		if (req.query.status) filter.status = req.query.status;
-		if (req.query.academicYear) filter.academicYear = req.query.academicYear;
-		if (req.query.studentId) filter.student = req.query.studentId;
-		if (req.query.classId) filter.class = req.query.classId;
 
-		// Filtro por tipo de matrícula (curricular/extracurricular)
-		if (req.query.enrollmentType) {
-			const enrollmentType = req.query.enrollmentType;
-
-			if (enrollmentType === 'curricular') {
-				// Buscar classes que têm disciplinas majoritariamente mandatory
-				const classesWithMandatorySubjects = await getClassesWithMandatorySubjects(schoolId);
-				filter.class = { $in: classesWithMandatorySubjects };
-			} else if (enrollmentType === 'extracurricular') {
-				// Buscar classes que não têm disciplinas majoritariamente mandatory
-				const classesWithMandatorySubjects = await getClassesWithMandatorySubjects(schoolId);
-				filter.class = { $nin: classesWithMandatorySubjects };
+		// Filtro por academicYear (indireto via class)
+		if (req.query.academicYear) {
+			const classes = await Classes.find({
+				academicYear: req.query.academicYear,
+				school: schoolId
+			});
+			
+			if (classes.length > 0) {
+				filter.class = { $in: classes.map(c => c._id) };
+			} else {
+				// Se não encontrar classes com o filtro, retornar vazio
+				return res.status(200).json({
+					success: true,
+					data: {
+						enrollments: [],
+						pagination: {
+							currentPage: page,
+							totalPages: 0,
+							totalItems: 0,
+							itemsPerPage: limit,
+							hasNextPage: false,
+							hasPreviousPage: false
+						}
+					}
+				});
 			}
 		}
 
-		// Busca por nome do aluno (requer populate)
-		const searchQuery = req.query.search || '';
-		let enrollmentsQuery = Enrollment.find(filter)
-			.populate({
-				path: 'student',
-				select: 'firstName lastName registrationNumber'
-			})
-			.populate({
-				path: 'class',
-				select: 'name yearLevel',
-				populate: {
-					path: 'yearLevel',
-					select: 'name order'
-				}
-			})
-			.sort({ [sortBy]: order === 'desc' ? -1 : 1 })
-			.skip(+skip)
-			.limit(+limit);
-
-		// Aplicar filtro de busca após o populate
-		if (searchQuery) {
-			const enrollments = await enrollmentsQuery;
-			const filteredEnrollments = enrollments.filter(enrollment => {
-				const studentName = `${enrollment.student.firstName} ${enrollment.student.lastName}`.toLowerCase();
-				const regNumber = enrollment.student.registrationNumber?.toLowerCase() || '';
-				const className = enrollment.class.name.toLowerCase();
-
-				return studentName.includes(searchQuery.toLowerCase()) ||
-					regNumber.includes(searchQuery.toLowerCase()) ||
-					className.includes(searchQuery.toLowerCase());
+		// Filtro por yearLevel (indireto via class)
+		if (req.query.yearLevel) {
+			const classes = await Classes.find({
+				yearLevel: req.query.yearLevel,
+				school: schoolId
 			});
-
-			const totalCount = filteredEnrollments.length;
-			const totalPages = Math.ceil(totalCount / limit);
-
-			return res.status(200).json({
-				success: true,
-				data: {
-					enrollments: filteredEnrollments,
-					pagination: {
-						currentPage: page,
-						totalPages,
-						totalItems: totalCount,
-						itemsPerPage: limit,
-						hasNextPage: page < totalPages,
-						hasPreviousPage: page > 1
+			
+			if (classes.length > 0) {
+				// Se já temos um filtro de class, fazemos a interseção
+				if (filter.class) {
+					const classIds = classes.map(c => c._id.toString());
+					// Garantir que estamos trabalhando com strings para comparação
+					if (Array.isArray(filter.class.$in)) {
+						filter.class.$in = filter.class.$in
+							.map(id => id.toString())
+							.filter(id => classIds.includes(id))
+							.map(id => mongoose.Types.ObjectId(id));
+						
+						if (filter.class.$in.length === 0) {
+							return res.status(200).json({
+								success: true,
+								data: {
+									enrollments: [],
+									pagination: {
+										currentPage: page,
+										totalPages: 0,
+										totalItems: 0,
+										itemsPerPage: limit,
+										hasNextPage: false,
+										hasPreviousPage: false
+									}
+								}
+							});
+						}
+					} else {
+						// Se filter.class não é um array, verificar se está nas classes filtradas
+						if (!classIds.includes(filter.class.toString())) {
+							return res.status(200).json({
+								success: true,
+								data: {
+									enrollments: [],
+									pagination: {
+										currentPage: page,
+										totalPages: 0,
+										totalItems: 0,
+										itemsPerPage: limit,
+										hasNextPage: false,
+										hasPreviousPage: false
+									}
+								}
+							});
+						}
 					}
+				} else {
+					filter.class = { $in: classes.map(c => c._id) };
 				}
-			});
+			} else {
+				// Se não encontrar classes com o filtro, retornar vazio
+				return res.status(200).json({
+					success: true,
+					data: {
+						enrollments: [],
+						pagination: {
+							currentPage: page,
+							totalPages: 0,
+							totalItems: 0,
+							itemsPerPage: limit,
+							hasNextPage: false,
+							hasPreviousPage: false
+						}
+					}
+				});
+			}
 		}
 
-		// Sem filtro de busca, usar countDocuments para eficiência
+		// Busca por rollNumber
+		if (req.query.search) {
+			filter.rollNumber = new RegExp(req.query.search, 'i');
+		}
+
+		// Filtro por intervalo de datas
+		if (req.query.startDate) {
+			filter.enrollmentDate = { ...filter.enrollmentDate, $gte: new Date(req.query.startDate) };
+		}
+		if (req.query.endDate) {
+			filter.enrollmentDate = { ...filter.enrollmentDate, $lte: new Date(req.query.endDate) };
+		}
+
 		const [totalCount, enrollments] = await Promise.all([
 			Enrollment.countDocuments(filter),
-			enrollmentsQuery
+			Enrollment.find(filter)
+				.populate({
+					path: 'student',
+					select: 'firstName lastName registrationNumber'
+				})
+				.populate({
+					path: 'class',
+					select: 'name yearLevel academicYear',
+					populate: [
+						{ path: 'yearLevel', select: 'name order' },
+						{ path: 'academicYear', select: 'name startDate endDate' }
+					]
+				})
+				.sort({ [sortBy]: order })
+				.skip(skip)
+				.limit(limit)
 		]);
 
 		const totalPages = Math.ceil(totalCount / limit);
@@ -149,15 +202,15 @@ exports.getEnrollment = async (req, res, next) => {
 		})
 			.populate({
 				path: 'student',
-				select: 'firstName lastName registrationNumber dateOfBirth gender contactInformation'
+				select: 'firstName lastName registrationNumber'
 			})
 			.populate({
 				path: 'class',
 				select: 'name yearLevel academicYear',
-				populate: {
-					path: 'yearLevel',
-					select: 'name order'
-				}
+				populate: [
+					{ path: 'yearLevel', select: 'name order' },
+					{ path: 'academicYear', select: 'name startDate endDate' }
+				]
 			});
 
 		if (!enrollment) return res.status(404).json(createErrorResponse('Enrollment not found'));
@@ -171,53 +224,51 @@ exports.getEnrollment = async (req, res, next) => {
  */
 exports.createEnrollment = async (req, res, next) => {
 	try {
-		const { student: studentId, class: classId, academicYear, enrollmentDate, rollNumber, status, documents, generalObservations } = req.body;
+		const { studentId, classId, enrollmentDate, rollNumber, status, documents, generalObservations, isTransfer } = req.body;
 
 		// Validações básicas
-		if (!studentId || !classId || !academicYear) {
-			return res.status(400).json(createErrorResponse('Student, class and academic year are required'));
+		if (!studentId || !classId) {
+			return res.status(400).json(createErrorResponse('Student ID and Class ID are required'));
 		}
 
-		// Verificar se o estudante existe
-		const student = await Student.findOne({ _id: studentId, school: req.user.school });
+		// Verificar se o aluno existe
+		const student = await Student.findOne({
+			_id: studentId,
+			school: req.user.school
+		});
+
 		if (!student) {
 			return res.status(404).json(createErrorResponse('Student not found'));
 		}
 
 		// Verificar se a classe existe
-		const classObj = await Classes.findOne({ _id: classId, school: req.user.school })
-			.populate('yearLevel');
+		const classObj = await Classes.findOne({
+			_id: classId,
+			school: req.user.school
+		}).populate('yearLevel');
+
 		if (!classObj) {
 			return res.status(404).json(createErrorResponse('Class not found'));
 		}
 
-		// Verificar se o ano acadêmico existe
-		const academicYearObj = await AcademicYear.findOne({
-			_id: academicYear,
-			school: req.user.school
-		});
-		if (!academicYearObj) {
-			return res.status(404).json(createErrorResponse('Academic year not found'));
-		}
-
-		// Verificar se o aluno já está matriculado nesta classe específica
-		const existingClassEnrollment = await Enrollment.findOne({
+		// Verificar se já existe matrícula para este aluno nesta classe
+		const existingEnrollment = await Enrollment.findOne({
 			student: studentId,
 			class: classId
 		});
 
-		if (existingClassEnrollment) {
+		if (existingEnrollment) {
 			return res.status(400).json(createErrorResponse('Student is already enrolled in this class'));
 		}
 
 		// Determinar se a classe é curricular (tem disciplinas majoritariamente mandatory)
-		const classSubjects = await Subjects.find({
+		const classSubjects = await Subjects.find({ 
 			classes: classId,
 			school: req.user.school
 		});
 
 		const mandatorySubjects = classSubjects.filter(s => s.type === 'mandatory');
-		const isCurricular = mandatorySubjects.length > 0 &&
+		const isCurricular = mandatorySubjects.length > 0 && 
 			(mandatorySubjects.length / classSubjects.length >= 0.5 || mandatorySubjects.length >= 3);
 
 		// Validações específicas para turmas curriculares
@@ -225,168 +276,66 @@ exports.createEnrollment = async (req, res, next) => {
 			// Verificar se o aluno já está matriculado em outra turma curricular no mesmo ano acadêmico
 			const existingEnrollments = await Enrollment.find({
 				student: studentId,
-				academicYear: academicYear,
-				class: { $ne: classId }
-			}).populate('class');
+				status: 'studying'
+			}).populate({
+				path: 'class',
+				select: 'academicYear',
+				match: { academicYear: classObj.academicYear }
+			});
 
-			// Para cada matrícula existente, verificar se a turma é curricular
-			for (const enrollment of existingEnrollments) {
-				const enrollmentClassSubjects = await Subjects.find({
-					classes: enrollment.class._id,
-					school: req.user.school
-				});
-
-				const enrollmentMandatorySubjects = enrollmentClassSubjects.filter(s => s.type === 'mandatory');
-				const isEnrollmentCurricular = enrollmentMandatorySubjects.length > 0 &&
-					(enrollmentMandatorySubjects.length / enrollmentClassSubjects.length >= 0.5 ||
-						enrollmentMandatorySubjects.length >= 3);
-
-				if (isEnrollmentCurricular) {
-					return res.status(400).json(createErrorResponse(
-						'Student is already enrolled in another curricular class for this academic year'
-					));
-				}
+			const curriculumEnrollments = existingEnrollments.filter(e => e.class !== null);
+			
+			if (curriculumEnrollments.length > 0) {
+				return res.status(400).json(createErrorResponse(
+					'Student already enrolled in another curriculum class for this academic year'
+				));
 			}
 
 			// Verificar pré-requisitos (Year Level anterior) apenas para turmas curriculares
 			if (classObj.yearLevel && classObj.yearLevel.order > 1) {
 				// Verificar se o Year Level tem um pré-requisito específico
 				const yearLevel = await YearLevel.findById(classObj.yearLevel._id);
-
+				
 				if (yearLevel.prerequisiteYearLevel) {
 					// Verificar se o aluno foi aprovado no Year Level pré-requisito
-					const prerequisiteClasses = await Classes.find({
-						yearLevel: yearLevel.prerequisiteYearLevel
-					});
-
-					if (prerequisiteClasses.length > 0) {
-						// Buscar matrículas do aluno nas turmas do Year Level pré-requisito
-						const prerequisiteEnrollments = await Enrollment.find({
-							student: studentId,
-							class: { $in: prerequisiteClasses.map(c => c._id) }
-						});
-
-						// Verificar se o aluno foi aprovado em todas as disciplinas mandatórias
-						let allMandatoryPassed = true;
-
-						for (const enrollment of prerequisiteEnrollments) {
-							// Buscar disciplinas mandatórias da turma
-							const mandatorySubjects = await Subjects.find({
-								classes: enrollment.class,
-								type: 'mandatory'
-							});
-
-							// Verificar aprovação em cada disciplina mandatória
-							for (const subject of mandatorySubjects) {
-								const marks = await Marks.find({
-									student: studentId,
-									subject: subject._id
-								});
-
-								if (marks.length === 0) {
-									allMandatoryPassed = false;
-									break;
-								}
-
-								// Calcular média das notas
-								const sum = marks.reduce((acc, mark) => acc + mark.grade, 0);
-								const average = sum / marks.length;
-
-								if (average < subject.minGradeToPass) {
-									allMandatoryPassed = false;
-									break;
-								}
-							}
-
-							if (!allMandatoryPassed) break;
-						}
-
-						if (!allMandatoryPassed && status !== 'transferred') {
-							return res.status(400).json(createErrorResponse(
-								'Student has not been approved in all mandatory subjects of the prerequisite year level'
-							));
-						}
+					const prerequisiteApproved = await checkYearLevelApproval(
+						studentId, 
+						yearLevel.prerequisiteYearLevel
+					);
+					
+					if (!prerequisiteApproved && !isTransfer) {
+						return res.status(400).json(createErrorResponse(
+							`Student must be approved in the prerequisite Year Level first`
+						));
 					}
 				} else {
-					// Se não há pré-requisito específico, verificar o Year Level de ordem anterior
+					// Se não tem pré-requisito específico, verificar o Year Level de ordem anterior
 					const previousYearLevel = await YearLevel.findOne({
-						school: req.user.school,
-						order: classObj.yearLevel.order - 1
+						order: classObj.yearLevel.order - 1,
+						educationalSegment: classObj.educationalSegment
 					});
-
+					
 					if (previousYearLevel) {
-						// Buscar classes do Year Level anterior
-						const previousClasses = await Classes.find({
-							yearLevel: previousYearLevel._id
-						});
-
-						if (previousClasses.length > 0) {
-							// Verificar se o aluno foi aprovado em alguma classe do Year Level anterior
-							const previousEnrollments = await Enrollment.find({
-								student: studentId,
-								class: { $in: previousClasses.map(c => c._id) }
-							});
-
-							if (previousEnrollments.length === 0 && status !== 'transferred') {
-								return res.status(400).json(createErrorResponse(
-									'Student has not been enrolled in the previous year level'
-								));
-							}
-
-							// Verificar se o aluno foi aprovado em todas as disciplinas mandatórias
-							let allMandatoryPassed = true;
-
-							for (const enrollment of previousEnrollments) {
-								// Buscar disciplinas mandatórias da turma
-								const mandatorySubjects = await Subjects.find({
-									classes: enrollment.class,
-									type: 'mandatory'
-								});
-
-								// Verificar aprovação em cada disciplina mandatória
-								for (const subject of mandatorySubjects) {
-									const marks = await Marks.find({
-										student: studentId,
-										subject: subject._id
-									});
-
-									if (marks.length === 0) {
-										allMandatoryPassed = false;
-										break;
-									}
-
-									// Calcular média das notas
-									const sum = marks.reduce((acc, mark) => acc + mark.grade, 0);
-									const average = sum / marks.length;
-
-									if (average < subject.minGradeToPass) {
-										allMandatoryPassed = false;
-										break;
-									}
-								}
-
-								if (!allMandatoryPassed) break;
-							}
-
-							if (!allMandatoryPassed && status !== 'transferred') {
-								return res.status(400).json(createErrorResponse(
-									'Student has not been approved in all mandatory subjects of the previous year level'
-								));
-							}
+						const previousApproved = await checkYearLevelApproval(
+							studentId, 
+							previousYearLevel._id
+						);
+						
+						if (!previousApproved && !isTransfer) {
+							return res.status(400).json(createErrorResponse(
+								`Student must be approved in the previous Year Level first`
+							));
 						}
 					}
 				}
 			}
 		}
-		// Para turmas extracurriculares (não curriculares), não há verificação de unicidade por ano acadêmico
-		// nem verificação de pré-requisitos de Year Level
 
 		// Criar a matrícula
 		const enrollment = await Enrollment.create({
 			school: req.user.school,
 			student: studentId,
 			class: classId,
-			academicYear,
 			enrollmentDate: enrollmentDate || new Date(),
 			rollNumber,
 			status: status || 'studying',
@@ -402,24 +351,18 @@ exports.createEnrollment = async (req, res, next) => {
 			})
 			.populate({
 				path: 'class',
-				select: 'name yearLevel',
-				populate: {
-					path: 'yearLevel',
-					select: 'name order'
-				}
+				select: 'name yearLevel academicYear',
+				populate: [
+					{ path: 'yearLevel', select: 'name order' },
+					{ path: 'academicYear', select: 'name startDate endDate' }
+				]
 			});
 
 		res.status(201).json({
 			success: true,
-			data: populatedEnrollment,
-			message: 'Enrollment created successfully'
+			data: populatedEnrollment
 		});
-	} catch (err) {
-		if (err.code === 11000) {
-			return res.status(400).json(createErrorResponse('Duplicate enrollment. Student may already be enrolled in this class.'));
-		}
-		next(err);
-	}
+	} catch (err) { next(err); }
 };
 
 /**
@@ -429,13 +372,6 @@ exports.updateEnrollment = async (req, res, next) => {
 	try {
 		const { id } = req.params;
 		const { rollNumber, status, documents, generalObservations, finalGrade } = req.body;
-
-		// Não permitir atualização de student, class ou academicYear
-		if (req.body.student || req.body.class || req.body.academicYear) {
-			return res.status(400).json(createErrorResponse(
-				'Cannot update student, class or academic year. Create a new enrollment instead.'
-			));
-		}
 
 		// Verificar se a matrícula existe
 		const enrollment = await Enrollment.findOne({
@@ -474,69 +410,17 @@ exports.updateEnrollment = async (req, res, next) => {
 			})
 			.populate({
 				path: 'class',
-				select: 'name yearLevel',
-				populate: {
-					path: 'yearLevel',
-					select: 'name order'
-				}
+				select: 'name yearLevel academicYear',
+				populate: [
+					{ path: 'yearLevel', select: 'name order' },
+					{ path: 'academicYear', select: 'name startDate endDate' }
+				]
 			});
 
 		res.json({
 			success: true,
 			data: updatedEnrollment,
 			message: 'Enrollment updated successfully'
-		});
-	} catch (err) { next(err); }
-};
-
-/**
- * Atualiza o status de uma matrícula
- */
-exports.updateEnrollmentStatus = async (req, res, next) => {
-	try {
-		const { id } = req.params;
-		const { status } = req.body;
-
-		// Verificar se a matrícula existe
-		const enrollment = await Enrollment.findOne({
-			_id: id,
-			school: req.user.school
-		});
-
-		if (!enrollment) {
-			return res.status(404).json(createErrorResponse('Enrollment not found'));
-		}
-
-		// Validar status
-		if (!status || !['studying', 'approved', 'failed', 'transferred', 'withdrawn'].includes(status)) {
-			return res.status(400).json(createErrorResponse(
-				'Invalid status. Must be one of: studying, approved, failed, transferred, withdrawn'
-			));
-		}
-
-		// Atualizar o status
-		const updatedEnrollment = await Enrollment.findByIdAndUpdate(
-			id,
-			{ $set: { status } },
-			{ new: true }
-		)
-			.populate({
-				path: 'student',
-				select: 'firstName lastName registrationNumber'
-			})
-			.populate({
-				path: 'class',
-				select: 'name yearLevel',
-				populate: {
-					path: 'yearLevel',
-					select: 'name order'
-				}
-			});
-
-		res.json({
-			success: true,
-			data: updatedEnrollment,
-			message: 'Enrollment status updated successfully'
 		});
 	} catch (err) { next(err); }
 };
@@ -558,7 +442,7 @@ exports.deleteEnrollment = async (req, res, next) => {
 			return res.status(404).json(createErrorResponse('Enrollment not found'));
 		}
 
-		// Verificar se existem notas ou outros registros dependentes
+		// Verificar se existem notas associadas a esta matrícula
 		const hasMarks = await Marks.exists({
 			student: enrollment.student,
 			class: enrollment.class
@@ -566,7 +450,7 @@ exports.deleteEnrollment = async (req, res, next) => {
 
 		if (hasMarks) {
 			return res.status(400).json(createErrorResponse(
-				'Cannot delete enrollment with associated marks. Update status to withdrawn instead.'
+				'Cannot delete enrollment with associated marks. Change status to withdrawn instead.'
 			));
 		}
 
@@ -581,32 +465,91 @@ exports.deleteEnrollment = async (req, res, next) => {
 };
 
 /**
- * Lista matrículas de um aluno específico
+ * Atualiza o status de uma matrícula
  */
-exports.getStudentEnrollments = async (req, res, next) => {
+exports.updateStatus = async (req, res, next) => {
 	try {
-		const { studentId } = req.params;
-		const { academicYear } = req.query;
+		const { id } = req.params;
+		const { status, finalGrade } = req.body;
 
-		const filter = {
-			student: studentId,
-			school: req.user.school
-		};
-
-		if (academicYear) {
-			filter.academicYear = academicYear;
+		// Validar status
+		if (!['studying', 'approved', 'failed', 'transferred', 'withdrawn'].includes(status)) {
+			return res.status(400).json(createErrorResponse(
+				'Invalid status. Must be one of: studying, approved, failed, transferred, withdrawn'
+			));
 		}
 
-		const enrollments = await Enrollment.find(filter)
+		// Verificar se a matrícula existe
+		const enrollment = await Enrollment.findOne({
+			_id: id,
+			school: req.user.school
+		});
+
+		if (!enrollment) {
+			return res.status(404).json(createErrorResponse('Enrollment not found'));
+		}
+
+		// Atualizar status
+		const updates = { status };
+		if (finalGrade !== undefined) updates.finalGrade = finalGrade;
+
+		const updatedEnrollment = await Enrollment.findByIdAndUpdate(
+			id,
+			{ $set: updates },
+			{ new: true }
+		)
+			.populate({
+				path: 'student',
+				select: 'firstName lastName registrationNumber'
+			})
 			.populate({
 				path: 'class',
 				select: 'name yearLevel academicYear',
-				populate: {
-					path: 'yearLevel',
-					select: 'name order'
-				}
+				populate: [
+					{ path: 'yearLevel', select: 'name order' },
+					{ path: 'academicYear', select: 'name startDate endDate' }
+				]
+			});
+
+		res.json({
+			success: true,
+			data: updatedEnrollment,
+			message: 'Enrollment status updated successfully'
+		});
+	} catch (err) { next(err); }
+};
+
+/**
+ * Lista matrículas por aluno
+ */
+exports.listByStudent = async (req, res, next) => {
+	try {
+		const { studentId } = req.params;
+
+		// Verificar se o aluno existe
+		const student = await Student.findOne({
+			_id: studentId,
+			school: req.user.school
+		});
+
+		if (!student) {
+			return res.status(404).json(createErrorResponse('Student not found'));
+		}
+
+		// Buscar todas as matrículas do aluno
+		const enrollments = await Enrollment.find({
+			student: studentId,
+			school: req.user.school
+		})
+			.populate({
+				path: 'class',
+				select: 'name yearLevel academicYear',
+				populate: [
+					{ path: 'yearLevel', select: 'name order' },
+					{ path: 'academicYear', select: 'name startDate endDate' }
+				]
 			})
-			.sort({ enrollmentDate: -1 });
+			.sort({ 'class.academicYear.startDate': -1 }); // Ordenar por ano acadêmico mais recente
 
 		res.json({
 			success: true,
@@ -616,28 +559,32 @@ exports.getStudentEnrollments = async (req, res, next) => {
 };
 
 /**
- * Lista alunos matriculados em uma turma específica
+ * Lista matrículas por turma
  */
-exports.getClassEnrollments = async (req, res, next) => {
+exports.listByClass = async (req, res, next) => {
 	try {
 		const { classId } = req.params;
-		const { status } = req.query;
 
-		const filter = {
-			class: classId,
+		// Verificar se a turma existe
+		const classObj = await Classes.findOne({
+			_id: classId,
 			school: req.user.school
-		};
+		});
 
-		if (status) {
-			filter.status = status;
+		if (!classObj) {
+			return res.status(404).json(createErrorResponse('Class not found'));
 		}
 
-		const enrollments = await Enrollment.find(filter)
+		// Buscar todas as matrículas da turma
+		const enrollments = await Enrollment.find({
+			class: classId,
+			school: req.user.school
+		})
 			.populate({
 				path: 'student',
-				select: 'firstName lastName registrationNumber dateOfBirth gender contactInformation'
+				select: 'firstName lastName registrationNumber'
 			})
-			.sort({ 'student.firstName': 1, 'student.lastName': 1 });
+			.sort({ 'student.firstName': 1 }); // Ordenar por nome do aluno
 
 		res.json({
 			success: true,
@@ -645,6 +592,131 @@ exports.getClassEnrollments = async (req, res, next) => {
 		});
 	} catch (err) { next(err); }
 };
+
+/**
+ * Lista matrículas por ano acadêmico
+ */
+exports.listByAcademicYear = async (req, res, next) => {
+	try {
+		const { academicYearId } = req.params;
+		
+		// Primeiro, encontrar classes deste ano acadêmico
+		const classes = await Classes.find({
+			academicYear: academicYearId,
+			school: req.user.school
+		});
+		
+		if (!classes.length) {
+			return res.json({
+				success: true,
+				data: []
+			});
+		}
+		
+		// Depois, buscar matrículas nestas classes
+		const enrollments = await Enrollment.find({
+			class: { $in: classes.map(c => c._id) },
+			school: req.user.school
+		})
+			.populate({
+				path: 'student',
+				select: 'firstName lastName registrationNumber'
+			})
+			.populate({
+				path: 'class',
+				select: 'name yearLevel',
+				populate: {
+					path: 'yearLevel',
+					select: 'name order'
+				}
+			});
+		
+		res.json({
+			success: true,
+			data: enrollments
+		});
+	} catch (err) { next(err); }
+};
+
+/**
+ * Verifica pré-requisitos para matrícula
+ */
+exports.checkPrerequisites = async (req, res, next) => {
+	try {
+		const { studentId, classId } = req.params;
+
+		// Verificar se o aluno e a classe existem
+		const [student, classObj] = await Promise.all([
+			Student.findOne({ _id: studentId, school: req.user.school }),
+			Classes.findOne({ _id: classId, school: req.user.school }).populate('yearLevel')
+		]);
+
+		if (!student) {
+			return res.status(404).json(createErrorResponse('Student not found'));
+		}
+
+		if (!classObj) {
+			return res.status(404).json(createErrorResponse('Class not found'));
+		}
+
+		// Se a classe não tem Year Level ou é uma série inicial, não há pré-requisitos
+		if (!classObj.yearLevel || classObj.yearLevel.order <= 1) {
+			return res.json({
+				success: true,
+				data: {
+					eligible: true,
+					message: 'No prerequisites required for this class'
+				}
+			});
+		}
+
+		// Verificar se o Year Level tem um pré-requisito específico
+		const yearLevel = await YearLevel.findById(classObj.yearLevel._id);
+		
+		let prerequisiteYearLevelId = null;
+		let prerequisiteMessage = '';
+		
+		if (yearLevel.prerequisiteYearLevel) {
+			prerequisiteYearLevelId = yearLevel.prerequisiteYearLevel;
+			const prerequisiteYearLevel = await YearLevel.findById(prerequisiteYearLevelId);
+			prerequisiteMessage = `Student must be approved in ${prerequisiteYearLevel.name} first`;
+		} else {
+			// Se não tem pré-requisito específico, verificar o Year Level de ordem anterior
+			const previousYearLevel = await YearLevel.findOne({
+				order: classObj.yearLevel.order - 1,
+				educationalSegment: classObj.educationalSegment
+			});
+			
+			if (previousYearLevel) {
+				prerequisiteYearLevelId = previousYearLevel._id;
+				prerequisiteMessage = `Student must be approved in ${previousYearLevel.name} first`;
+			} else {
+				return res.json({
+					success: true,
+					data: {
+						eligible: true,
+						message: 'No prerequisites found for this class'
+					}
+				});
+			}
+		}
+		
+		// Verificar se o aluno foi aprovado no Year Level pré-requisito
+		const prerequisiteApproved = await checkYearLevelApproval(
+			studentId, 
+			prerequisiteYearLevelId
+		);
+		
+		res.json({
+			success: true,
+			data: {
+				eligible: prerequisiteApproved,
+				message: prerequisiteApproved ? 'Student meets all prerequisites' : prerequisiteMessage
+			}
+		});
+	} catch (err) { next(err); }
+};
+
 
 /**
  * Obtém as disciplinas associadas a uma matrícula
@@ -669,12 +741,9 @@ exports.getEnrollmentSubjects = async (req, res, next) => {
 		console.log(classObj);
 		console.info("========================================================");
 
-		if (!classObj) {
-			return res.status(404).json(createErrorResponse('Class not found'));
-		}
+		if (!classObj) return res.status(404).json(createErrorResponse('Class not found'));
 
 		// Buscar disciplinas obrigatórias do Year Level
-
 		console.info("mandatorySubjects Query ===============================================");
 		console.log("yearLevel ID", classObj.yearLevel._id);
 		console.log("school", req.user.school);
@@ -793,31 +862,25 @@ exports.bulkUpdateStatus = async (req, res, next) => {
 	} catch (err) { next(err); }
 };
 
+
 /**
- * Função auxiliar para obter classes com disciplinas majoritariamente mandatórias
+ * Função auxiliar para verificar aprovação em um Year Level
+ * @param {string} studentId - ID do aluno
+ * @param {string} yearLevelId - ID do Year Level
+ * @returns {Promise<boolean>} - True se aprovado, False caso contrário
  */
-async function getClassesWithMandatorySubjects(schoolId) {
-	// Buscar todas as classes da escola
-	const classes = await Classes.find({ school: schoolId });
-	const result = [];
-
-	for (const classObj of classes) {
-		// Buscar disciplinas da turma
-		const subjects = await Subjects.find({
-			classes: classObj._id,
-			school: schoolId
-		});
-
-		if (subjects.length === 0) continue;
-
-		// Verificar se a maioria das disciplinas é mandatória
-		const mandatorySubjects = subjects.filter(s => s.type === 'mandatory');
-
-		if (mandatorySubjects.length > 0 &&
-			(mandatorySubjects.length / subjects.length >= 0.5 || mandatorySubjects.length >= 3)) {
-			result.push(classObj._id);
-		}
-	}
-
-	return result;
+async function checkYearLevelApproval(studentId, yearLevelId) {
+	// Buscar classes deste Year Level
+	const classes = await Classes.find({ yearLevel: yearLevelId });
+	
+	if (!classes.length) return false;
+	
+	// Verificar se o aluno foi aprovado em alguma classe deste Year Level
+	const enrollments = await Enrollment.find({
+		student: studentId,
+		class: { $in: classes.map(c => c._id) },
+		status: 'approved'
+	});
+	
+	return enrollments.length > 0;
 }

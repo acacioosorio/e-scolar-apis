@@ -10,7 +10,7 @@ mongoose.Promise = global.Promise;
  * 
  * Este modelo armazena as avaliações dos alunos em cada disciplina.
  * Cada registro representa uma nota específica de um aluno em uma avaliação
- * de uma disciplina, dentro de um período letivo e turma.
+ * de uma disciplina, dentro de uma turma.
  */
 const MarksSchema = new Schema(
 	{
@@ -35,14 +35,8 @@ const MarksSchema = new Schema(
 			required: [true, "Subject is required"],
 		},
 
-		// Ano acadêmico
-		academicYear: {
-			type: Schema.Types.ObjectId,
-			ref: "AcademicYear",
-			required: [true, "Academic year is required"],
-		},
-
 		// Turma do aluno
+		// Através da turma, obtemos academicYear
 		class: {
 			type: Schema.Types.ObjectId,
 			ref: "Classes",
@@ -122,19 +116,19 @@ const MarksSchema = new Schema(
 );
 
 // Índices para otimizar consultas comuns
-MarksSchema.index({ school: 1, academicYear: 1 });
-MarksSchema.index({ student: 1, academicYear: 1 });
-MarksSchema.index({ subject: 1, class: 1, academicYear: 1 });
-MarksSchema.index({ student: 1, subject: 1, academicYear: 1, evaluationPeriod: 1 });
+MarksSchema.index({ school: 1 });
+MarksSchema.index({ student: 1 });
+MarksSchema.index({ subject: 1, class: 1 });
+MarksSchema.index({ student: 1, subject: 1, class: 1, evaluationPeriod: 1 });
 
 /**
  * Método para calcular a média das notas de um aluno em uma disciplina e período
  */
-MarksSchema.statics.calculateAverage = async function (studentId, subjectId, academicYearId, evaluationPeriod = null) {
+MarksSchema.statics.calculateAverage = async function (studentId, subjectId, classId, evaluationPeriod = null) {
 	const query = {
 		student: studentId,
 		subject: subjectId,
-		academicYear: academicYearId,
+		class: classId
 	};
 
 	// Se um período específico for fornecido, filtrar por ele
@@ -173,9 +167,9 @@ MarksSchema.statics.calculateAverage = async function (studentId, subjectId, aca
 /**
  * Método para verificar se um aluno atingiu a nota mínima em uma disciplina
  */
-MarksSchema.statics.checkApproval = async function (studentId, subjectId, academicYearId) {
+MarksSchema.statics.checkApproval = async function (studentId, subjectId, classId) {
 	// Calcular a média do aluno
-	const result = await this.calculateAverage(studentId, subjectId, academicYearId);
+	const result = await this.calculateAverage(studentId, subjectId, classId);
 
 	// Buscar a disciplina para obter a nota mínima para aprovação
 	const Subject = mongoose.model('Subjects');
@@ -199,18 +193,25 @@ MarksSchema.statics.checkApproval = async function (studentId, subjectId, academ
 /**
  * Método para obter o boletim completo de um aluno
  */
-MarksSchema.statics.getStudentReport = async function (studentId, academicYearId, classId) {
+MarksSchema.statics.getStudentReport = async function (studentId, classId) {
+	// Buscar a classe para obter informações
+	const Class = mongoose.model('Classes');
+	const classObj = await Class.findById(classId).populate('academicYear');
+
+	if (!classObj) {
+		throw new Error('Class not found');
+	}
+
 	// Buscar todas as disciplinas da turma
 	const Subject = mongoose.model('Subjects');
 	const subjects = await Subject.find({
-		classes: classId,
-		academicYear: academicYearId
+		classes: classId
 	});
 
 	// Para cada disciplina, calcular a média e verificar aprovação
 	const results = await Promise.all(
 		subjects.map(async (subject) => {
-			const approval = await this.checkApproval(studentId, subject._id, academicYearId);
+			const approval = await this.checkApproval(studentId, subject._id, classId);
 
 			// Buscar notas por período para esta disciplina
 			const periods = ['first', 'second', 'third', 'fourth', 'final', 'recovery'];
@@ -218,7 +219,7 @@ MarksSchema.statics.getStudentReport = async function (studentId, academicYearId
 
 			for (const period of periods) {
 				const periodResult = await this.calculateAverage(
-					studentId, subject._id, academicYearId, period
+					studentId, subject._id, classId, period
 				);
 
 				if (periodResult.totalMarks > 0) {
@@ -248,8 +249,8 @@ MarksSchema.statics.getStudentReport = async function (studentId, academicYearId
 
 	return {
 		student: studentId,
-		academicYear: academicYearId,
 		class: classId,
+		academicYear: classObj.academicYear._id, // Obtido da classe
 		subjects: results,
 		statistics: {
 			totalSubjects,

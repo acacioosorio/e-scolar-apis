@@ -11,7 +11,7 @@ const { authorizeRoles, authorizeSubRoles } = require('../../middleware/auth');
 const { auditCreate, auditUpdate, auditDelete } = require('../../middleware/audit.middleware');
 const Enrollment = require('./enrollment.model');
 
-// Enrollment management routes
+// Listar matrículas com filtros e paginação
 router.get('/',
 	passport.authenticate('jwt-user', { session: false }),
 	authorizeRoles('backoffice', 'school'),
@@ -19,6 +19,7 @@ router.get('/',
 	controller.listEnrollments
 );
 
+// Obter detalhes de uma matrícula específica
 router.get('/:id',
 	passport.authenticate('jwt-user', { session: false }),
 	authorizeRoles('backoffice', 'school'),
@@ -26,6 +27,7 @@ router.get('/:id',
 	controller.getEnrollment
 );
 
+// Criar uma nova matrícula
 router.post('/',
 	passport.authenticate('jwt-user', { session: false }),
 	authorizeRoles('backoffice', 'school'),
@@ -34,6 +36,7 @@ router.post('/',
 	controller.createEnrollment
 );
 
+// Atualizar uma matrícula existente
 router.put('/:id',
 	passport.authenticate('jwt-user', { session: false }),
 	authorizeRoles('backoffice', 'school'),
@@ -42,14 +45,16 @@ router.put('/:id',
 	controller.updateEnrollment
 );
 
+// Atualizar o status de uma matrícula
 router.patch('/:id/status',
 	passport.authenticate('jwt-user', { session: false }),
 	authorizeRoles('backoffice', 'school'),
 	authorizeSubRoles('admin', 'staff'),
 	auditUpdate('Enrollment', Enrollment),
-	controller.updateEnrollmentStatus
+	controller.updateStatus
 );
 
+// Excluir uma matrícula
 router.delete('/:id',
 	passport.authenticate('jwt-user', { session: false }),
 	authorizeRoles('backoffice', 'school'),
@@ -58,21 +63,39 @@ router.delete('/:id',
 	controller.deleteEnrollment
 );
 
-// Additional enrollment routes
+// Listar matrículas por aluno
 router.get('/student/:studentId',
 	passport.authenticate('jwt-user', { session: false }),
 	authorizeRoles('backoffice', 'school'),
 	authorizeSubRoles('admin', 'staff', 'teacher'),
-	controller.getStudentEnrollments
+	controller.listByStudent
 );
 
+// Listar matrículas por turma
 router.get('/class/:classId',
 	passport.authenticate('jwt-user', { session: false }),
 	authorizeRoles('backoffice', 'school'),
 	authorizeSubRoles('admin', 'staff', 'teacher'),
-	controller.getClassEnrollments
+	controller.listByClass
 );
 
+// Listar matrículas por ano acadêmico
+router.get('/academic-year/:academicYearId',
+	passport.authenticate('jwt-user', { session: false }),
+	authorizeRoles('backoffice', 'school'),
+	authorizeSubRoles('admin', 'staff', 'teacher'),
+	controller.listByAcademicYear
+);
+
+// Verificar pré-requisitos para matrícula
+router.get('/prerequisites/:studentId/:classId',
+	passport.authenticate('jwt-user', { session: false }),
+	authorizeRoles('backoffice', 'school'),
+	authorizeSubRoles('admin', 'staff', 'teacher'),
+	controller.checkPrerequisites
+);
+
+// Obtém as disciplinas associadas a uma matrícula
 router.get('/:id/subjects',
 	passport.authenticate('jwt-user', { session: false }),
 	authorizeRoles('backoffice', 'school'),
@@ -80,6 +103,7 @@ router.get('/:id/subjects',
 	controller.getEnrollmentSubjects
 );
 
+// Atualiza o status de múltiplas matrículas
 router.post('/bulk-status-update',
 	passport.authenticate('jwt-user', { session: false }),
 	authorizeRoles('backoffice', 'school'),

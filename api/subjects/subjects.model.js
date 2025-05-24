@@ -20,17 +20,8 @@ const SubjectSchema = new Schema(
 		code: {
 			type: String,
 		},
-		academicYear: {
-			type: Schema.Types.ObjectId,
-			ref: "AcademicYear",
-			required: true,
-			required: [true, "Academic year is required"],
-		},
-		yearLevel: {
-			type: Schema.Types.ObjectId,
-			ref: 'YearLevel',
-			required: [true, 'Year Level is required'],
-		},
+		// Removido academicYear e yearLevel diretos
+		// Associação apenas com classes
 		classes: [{
 			type: Schema.Types.ObjectId,
 			ref: 'Classes'
@@ -54,7 +45,6 @@ const SubjectSchema = new Schema(
 		},
 		description: String,
 
-		// Novos campos
 		// Carga horária total da disciplina (em horas)
 		workload: {
 			type: Number,
@@ -92,7 +82,9 @@ const SubjectSchema = new Schema(
 	{ timestamps: true }
 );
 
-// Índices existentes
-SubjectSchema.index({ school: 1, academicYear: 1, yearLevel: 1, code: 1 }, { unique: true });
+// Índice ajustado para não incluir academicYear e yearLevel
+SubjectSchema.index({ school: 1, code: 1 }, { unique: true });
+// Índice para consultas por classes
+SubjectSchema.index({ classes: 1 });
 
 module.exports = mongoose.models.Subjects || mongoose.model('Subjects', SubjectSchema);

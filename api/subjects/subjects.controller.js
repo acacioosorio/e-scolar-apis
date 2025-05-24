@@ -2,8 +2,10 @@
 // ./api/subjects/subjects.controller.js
 
 const Subjects = require('./subjects.model');
+const Classes = require('../classes/classes.model');
 const Marks = require('../marks/marks.model');
 const Enrollment = require('../enrollment/enrollment.model');
+const YearLevel = require('../pedagogy/yearLevel.model');
 const { createErrorResponse } = require('../../helpers');
 
 /**
@@ -28,15 +30,46 @@ exports.listSubjects = async (req, res, next) => {
 
 		const filter = { school: schoolId };
 
-		// Filtros adicionais
+		// Filtros diretos
 		if (req.query.status) filter.status = req.query.status;
-		if (req.query.academicYear) filter.academicYear = req.query.academicYear;
-		if (req.query.yearLevel) filter.yearLevel = req.query.yearLevel;
 		if (req.query.type) filter.type = req.query.type;
 		if (req.query.classId) filter.classes = req.query.classId;
 		if (req.query.employeeId) filter.employees = req.query.employeeId;
 
-		// Busca por nome
+		// Filtros indiretos via classes
+		let classFilter = {};
+		if (req.query.academicYear) classFilter.academicYear = req.query.academicYear;
+		if (req.query.yearLevel) classFilter.yearLevel = req.query.yearLevel;
+
+		// Se temos filtros de classe, primeiro buscamos as classes
+		if (Object.keys(classFilter).length > 0) {
+			const classes = await Classes.find({
+				...classFilter,
+				school: schoolId
+			});
+
+			if (classes.length > 0) {
+				filter.classes = { $in: classes.map(c => c._id) };
+			} else {
+				// Se não encontrar classes com os filtros, retornar vazio
+				return res.status(200).json({
+					success: true,
+					data: {
+						subjects: [],
+						pagination: {
+							currentPage: page,
+							totalPages: 0,
+							totalItems: 0,
+							itemsPerPage: limit,
+							hasNextPage: false,
+							hasPreviousPage: false
+						}
+					}
+				});
+			}
+		}
+
+		// Busca por nome, código ou descrição
 		if (req.query.search) {
 			const searchRegex = new RegExp(req.query.search, 'i');
 			filter.$or = [
@@ -49,10 +82,15 @@ exports.listSubjects = async (req, res, next) => {
 		const [totalCount, subjects] = await Promise.all([
 			Subjects.countDocuments(filter),
 			Subjects.find(filter)
-				.populate('yearLevel', 'name order')
-				.populate('academicYear', 'name startDate endDate')
+				.populate({
+					path: 'classes',
+					select: 'name yearLevel academicYear',
+					populate: [
+						{ path: 'yearLevel', select: 'name order' },
+						{ path: 'academicYear', select: 'name startDate endDate' }
+					]
+				})
 				.populate('employees', 'firstName lastName email')
-				.populate('classes', 'name')
 				.sort({ [sortBy]: order })
 				.skip(skip)
 				.limit(limit)
@@ -86,10 +124,15 @@ exports.getSubject = async (req, res, next) => {
 			_id: req.params.id,
 			school: req.user.school
 		})
-			.populate('yearLevel', 'name order')
-			.populate('academicYear', 'name startDate endDate')
+			.populate({
+				path: 'classes',
+				select: 'name yearLevel academicYear',
+				populate: [
+					{ path: 'yearLevel', select: 'name order' },
+					{ path: 'academicYear', select: 'name startDate endDate' }
+				]
+			})
 			.populate('employees', 'firstName lastName email')
-			.populate('classes', 'name')
 			.populate({
 				path: 'prerequisites.subject',
 				select: 'name code'
@@ -107,27 +150,36 @@ exports.getSubject = async (req, res, next) => {
 exports.createSubject = async (req, res, next) => {
 	try {
 		const {
-			name, code, academicYear, yearLevel, classes, type,
+			name, code, classes, type,
 			employees, description, workload, credits, minGradeToPass,
 			prerequisites
 		} = req.body;
 
 		// Validações básicas
-		if (!name || !academicYear || !yearLevel || !type) {
-			return res.status(400).json(createErrorResponse('Name, academic year, year level and type are required'));
+		if (!name || !classes || !classes.length || !type) {
+			return res.status(400).json(createErrorResponse('Name, classes and type are required'));
 		}
 
-		// Verificar se já existe uma disciplina com o mesmo código no mesmo ano acadêmico e nível
+		// Verificar se as classes existem
+		const classesExist = await Classes.find({
+			_id: { $in: classes },
+			school: req.user.school
+		});
+
+		if (classesExist.length !== classes.length) {
+			return res.status(400).json(createErrorResponse('One or more classes not found'));
+		}
+
+		// Verificar se já existe uma disciplina com o mesmo código nas mesmas classes
 		if (code) {
 			const existingSubject = await Subjects.findOne({
 				school: req.user.school,
-				academicYear,
-				yearLevel,
+				classes: { $in: classes },
 				code
 			});
 
 			if (existingSubject) {
-				return res.status(400).json(createErrorResponse('A subject with this code already exists for this academic year and year level'));
+				return res.status(400).json(createErrorResponse('A subject with this code already exists for these classes'));
 			}
 		}
 
@@ -171,9 +223,7 @@ exports.createSubject = async (req, res, next) => {
 			school: req.user.school,
 			name,
 			code,
-			academicYear,
-			yearLevel,
-			classes: classes || [],
+			classes,
 			type,
 			employees: employees || [],
 			status: 'active',
@@ -186,10 +236,15 @@ exports.createSubject = async (req, res, next) => {
 
 		// Retornar com dados populados
 		const populatedSubject = await Subjects.findById(subject._id)
-			.populate('yearLevel', 'name order')
-			.populate('academicYear', 'name startDate endDate')
+			.populate({
+				path: 'classes',
+				select: 'name yearLevel academicYear',
+				populate: [
+					{ path: 'yearLevel', select: 'name order' },
+					{ path: 'academicYear', select: 'name startDate endDate' }
+				]
+			})
 			.populate('employees', 'firstName lastName email')
-			.populate('classes', 'name')
 			.populate({
 				path: 'prerequisites.subject',
 				select: 'name code'
@@ -202,7 +257,7 @@ exports.createSubject = async (req, res, next) => {
 		});
 	} catch (err) {
 		if (err.code === 11000) {
-			return res.status(400).json(createErrorResponse('Duplicate subject. A subject with this combination of school, academic year, year level and code already exists.'));
+			return res.status(400).json(createErrorResponse('Duplicate subject. A subject with this combination already exists.'));
 		}
 		next(err);
 	}
@@ -218,13 +273,6 @@ exports.updateSubject = async (req, res, next) => {
 			name, code, classes, type, employees, description,
 			workload, credits, minGradeToPass, prerequisites, status
 		} = req.body;
-
-		// Não permitir atualização de school, academicYear ou yearLevel
-		if (req.body.school || req.body.academicYear || req.body.yearLevel) {
-			return res.status(400).json(createErrorResponse(
-				'Cannot update school, academic year or year level. Create a new subject instead.'
-			));
-		}
 
 		// Verificar se a disciplina existe
 		const subject = await Subjects.findOne({
@@ -298,10 +346,15 @@ exports.updateSubject = async (req, res, next) => {
 			{ $set: updates },
 			{ new: true }
 		)
-			.populate('yearLevel', 'name order')
-			.populate('academicYear', 'name startDate endDate')
+			.populate({
+				path: 'classes',
+				select: 'name yearLevel academicYear',
+				populate: [
+					{ path: 'yearLevel', select: 'name order' },
+					{ path: 'academicYear', select: 'name startDate endDate' }
+				]
+			})
 			.populate('employees', 'firstName lastName email')
-			.populate('classes', 'name')
 			.populate({
 				path: 'prerequisites.subject',
 				select: 'name code'
@@ -390,11 +443,55 @@ exports.checkPrerequisites = async (req, res, next) => {
 
 		// Verificar cada pré-requisito
 		for (const prereq of subject.prerequisites) {
-			// Buscar a nota mais recente do aluno neste pré-requisito
-			const mark = await Marks.findOne({
+			// Buscar a classe atual do aluno para obter o academicYear
+			const enrollment = await Enrollment.findOne({
 				student: studentId,
-				subject: prereq.subject._id
-			}).sort({ date: -1 });
+				status: 'studying'
+			}).populate('class');
+
+			if (!enrollment) {
+				return res.status(404).json(createErrorResponse('Student enrollment not found'));
+			}
+
+			// Buscar matrículas anteriores do aluno (aprovadas)
+			const previousEnrollments = await Enrollment.find({
+				student: studentId,
+				status: 'approved'
+			}).populate({
+				path: 'class',
+				populate: {
+					path: 'academicYear'
+				}
+			});
+
+			// Buscar a nota mais recente do aluno neste pré-requisito
+			// em qualquer matrícula anterior
+			let mark = null;
+
+			for (const prevEnrollment of previousEnrollments) {
+				// Buscar disciplinas da classe anterior
+				const classSubjects = await Subjects.find({
+					classes: prevEnrollment.class._id
+				});
+
+				// Verificar se o pré-requisito estava nesta classe
+				const subjectInClass = classSubjects.find(s =>
+					s._id.toString() === prereq.subject._id.toString());
+
+				if (subjectInClass) {
+					// Buscar a nota para esta disciplina nesta classe
+					const foundMark = await Marks.findOne({
+						student: studentId,
+						subject: prereq.subject._id,
+						class: prevEnrollment.class._id
+					}).sort({ date: -1 });
+
+					if (foundMark) {
+						mark = foundMark;
+						break; // Encontramos a nota mais recente
+					}
+				}
+			}
 
 			if (!mark || mark.grade < prereq.minGrade) {
 				results.push({
@@ -430,7 +527,7 @@ exports.checkPrerequisites = async (req, res, next) => {
  */
 exports.checkApproval = async (req, res, next) => {
 	try {
-		const { subjectId, studentId } = req.params;
+		const { subjectId, studentId, classId } = req.params;
 
 		// Verificar se a disciplina existe
 		const subject = await Subjects.findOne({
@@ -442,10 +539,21 @@ exports.checkApproval = async (req, res, next) => {
 			return res.status(404).json(createErrorResponse('Subject not found'));
 		}
 
-		// Buscar todas as notas do aluno nesta disciplina
+		// Verificar se a classe existe
+		const classObj = await Classes.findOne({
+			_id: classId,
+			school: req.user.school
+		});
+
+		if (!classObj) {
+			return res.status(404).json(createErrorResponse('Class not found'));
+		}
+
+		// Buscar todas as notas do aluno nesta disciplina e classe
 		const marks = await Marks.find({
 			student: studentId,
-			subject: subjectId
+			subject: subjectId,
+			class: classId
 		});
 
 		if (!marks.length) {
@@ -460,15 +568,22 @@ exports.checkApproval = async (req, res, next) => {
 			});
 		}
 
-		// Calcular média (implementação simplificada, ajuste conforme sua lógica de cálculo)
-		const sum = marks.reduce((acc, mark) => acc + mark.grade, 0);
-		const average = sum / marks.length;
+		// Calcular média ponderada
+		let totalWeight = 0;
+		let weightedSum = 0;
+
+		marks.forEach(mark => {
+			weightedSum += mark.grade * mark.weight;
+			totalWeight += mark.weight;
+		});
+
+		const average = totalWeight > 0 ? weightedSum / totalWeight : 0;
 
 		res.json({
 			success: true,
 			data: {
 				approved: average >= subject.minGradeToPass,
-				average,
+				average: parseFloat(average.toFixed(2)),
 				minRequired: subject.minGradeToPass
 			}
 		});
@@ -490,10 +605,24 @@ exports.findByTypeAndLevel = async (req, res, next) => {
 			));
 		}
 
-		const subjects = await Subjects.find({
+		// Primeiro, encontrar classes com este yearLevel e academicYear
+		const classes = await Classes.find({
 			school: schoolId,
 			yearLevel: yearLevelId,
-			academicYear: academicYearId,
+			academicYear: academicYearId
+		});
+
+		if (!classes.length) {
+			return res.json({
+				success: true,
+				data: []
+			});
+		}
+
+		// Depois, buscar disciplinas associadas a estas classes
+		const subjects = await Subjects.find({
+			school: schoolId,
+			classes: { $in: classes.map(c => c._id) },
 			type: type
 		}).populate('employees', 'firstName lastName email');
 
@@ -531,23 +660,29 @@ exports.getApprovalStats = async (req, res, next) => {
 		// Para cada aluno, verificar aprovação
 		const results = [];
 		for (const studentId of studentIds) {
-			// Buscar todas as notas do aluno nesta disciplina
-			const marks = await Marks.find({
-				student: studentId,
-				subject: subjectId
-			});
-
-			if (marks.length > 0) {
-				// Calcular média
-				const sum = marks.reduce((acc, mark) => acc + mark.grade, 0);
-				const average = sum / marks.length;
-				const approved = average >= subject.minGradeToPass;
-
-				results.push({
+			// Para cada classe onde o aluno está matriculado
+			for (const enrollment of enrollments.filter(e => e.student.toString() === studentId.toString())) {
+				// Buscar todas as notas do aluno nesta disciplina e classe
+				const marks = await Marks.find({
 					student: studentId,
-					approved,
-					average
+					subject: subjectId,
+					class: enrollment.class
 				});
+
+				if (marks.length > 0) {
+					// Calcular média
+					const sum = marks.reduce((acc, mark) => acc + mark.grade * mark.weight, 0);
+					const totalWeight = marks.reduce((acc, mark) => acc + mark.weight, 0);
+					const average = totalWeight > 0 ? sum / totalWeight : 0;
+					const approved = average >= subject.minGradeToPass;
+
+					results.push({
+						student: studentId,
+						class: enrollment.class,
+						approved,
+						average: parseFloat(average.toFixed(2))
+					});
+				}
 			}
 		}
 
@@ -562,9 +697,49 @@ exports.getApprovalStats = async (req, res, next) => {
 				subject: subject.name,
 				totalStudents,
 				approvedStudents,
-				approvalRate,
+				approvalRate: parseFloat(approvalRate.toFixed(2)),
 				details: results
 			}
+		});
+	} catch (err) { next(err); }
+};
+
+/**
+ * Atualiza o status de uma disciplina
+ */
+exports.updateStatus = async (req, res, next) => {
+	try {
+		const { id } = req.params;
+		const { status } = req.body;
+
+		// Validar status
+		if (!['active', 'inactive', 'archived'].includes(status)) {
+			return res.status(400).json(createErrorResponse(
+				'Invalid status. Must be one of: active, inactive, archived'
+			));
+		}
+
+		// Verificar se a disciplina existe
+		const subject = await Subjects.findOne({
+			_id: id,
+			school: req.user.school
+		});
+
+		if (!subject) {
+			return res.status(404).json(createErrorResponse('Subject not found'));
+		}
+
+		// Atualizar status
+		const updatedSubject = await Subjects.findByIdAndUpdate(
+			id,
+			{ $set: { status } },
+			{ new: true }
+		);
+
+		res.json({
+			success: true,
+			data: updatedSubject,
+			message: 'Subject status updated successfully'
 		});
 	} catch (err) { next(err); }
 };
@@ -586,18 +761,18 @@ async function checkCircularDependency(currentSubjectId, targetSubjectId, visite
 	visited.add(currentSubjectId);
 
 	// Verificar se a disciplina atual tem o alvo como pré-requisito
+	if (currentSubjectId === targetSubjectId) {
+		return true;
+	}
+
+	// Buscar a disciplina atual
 	const subject = await Subjects.findById(currentSubjectId);
 	if (!subject || !subject.prerequisites || subject.prerequisites.length === 0) {
 		return false;
 	}
 
-	// Verificar se algum pré-requisito é o alvo
+	// Verificar recursivamente os pré-requisitos
 	for (const prereq of subject.prerequisites) {
-		if (prereq.subject.toString() === targetSubjectId) {
-			return true;
-		}
-
-		// Verificar recursivamente os pré-requisitos dos pré-requisitos
 		const hasCircular = await checkCircularDependency(
 			prereq.subject.toString(),
 			targetSubjectId,
