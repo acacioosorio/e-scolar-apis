@@ -42,6 +42,13 @@ router.put('/segments/:id',
 	controller.updateSegment
 );
 
+router.patch('/segments/:id/status',
+	passport.authenticate('jwt-user', { session: false }),
+	authorizeRoles('backoffice', 'school'),
+	authorizeSubRoles('admin'), // Only admins can update status
+	controller.updateSegmentStatus
+);
+
 // Delete a segment
 router.delete('/segments/:id',
 	passport.authenticate('jwt-user', { session: false }),

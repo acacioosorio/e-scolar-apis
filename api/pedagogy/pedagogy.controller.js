@@ -224,6 +224,44 @@ exports.updateSegment = async (req, res) => {
 };
 
 /**
+ * Update Educational Segment Status
+ */
+exports.updateSegmentStatus = async (req, res) => {
+	try {
+		const { status } = req.body;
+		const schoolId = req.user?.school;
+		const segmentId = req.params.id;
+
+		if (!segmentId) {
+			return res.status(400).json(createErrorResponse("Segment ID is required"));
+		}
+
+		if (typeof status !== 'string' || !['active', 'inactive', 'archived'].includes(status)) {
+			return res.status(400).json(createErrorResponse('Status must be one of: active, inactive, archived'));
+		}
+
+		const updatedSegment = await EducationalSegment.findOneAndUpdate(
+			{ _id: segmentId, school: schoolId },
+			{ $set: { status } },
+			{ new: true }
+		);
+
+		if (!updatedSegment) {
+			return res.status(404).json(createErrorResponse("Segment not found or does not belong to this school"));
+		}
+
+		res.json({
+			success: true,
+			message: 'Segment status updated successfully',
+			data: updatedSegment
+		});
+	} catch (error) {
+		logger.error("Error updating segment status:", error);
+		res.status(500).json(createErrorResponse("Internal error while updating segment status", error.message));
+	}
+};
+
+/**
  * Delete an Educational Segment
  */
 exports.deleteSegment = async (req, res) => {

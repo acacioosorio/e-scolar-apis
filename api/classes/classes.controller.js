@@ -96,7 +96,19 @@ exports.listClasses = async (req, res) => {
 			.limit(limit)
 			.populate('school', 'name')
 			.populate('academicYear', 'year title')
-			.populate('yearLevel', 'name acronym')
+			.populate({
+				path: 'yearLevel',
+				select: 'name yearLevel educationalSegment',
+				populate: [
+					{ path: 'educationalSegment', select: 'name acronym status description' },
+					{ path: 'subjects',
+						select: 'name order employees',
+						populate: [
+							{ path: 'employees', select: 'firstName lastName email photo' },
+						]
+					},
+				]
+			})
 			.populate('educationalSegment', 'name acronym')
 			.populate('room', 'name capacity')
 			.populate('teacherResponsible', 'firstName lastName email photo');

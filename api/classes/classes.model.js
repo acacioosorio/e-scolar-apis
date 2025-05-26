@@ -13,10 +13,9 @@ const ClassSchema = new Schema(
 			ref: "School",
 			required: true,
 		},
-		educationalSegment: {
-			type: Schema.Types.ObjectId,
-			ref: "EducationalSegment",
-			required: true,
+		name: {
+			type: String,
+			required: [true, "Please add a Class name"],
 		},
 		yearLevel: {
 			type: Schema.Types.ObjectId,
@@ -28,43 +27,67 @@ const ClassSchema = new Schema(
 			ref: "AcademicYear",
 			required: true,
 		},
-		// Ex: "A", "B", "Manhã", "Integral 1"
-		name: {
-			type: String,
-			required: [true, "Please add a Class name"],
-		},
-		// If name wasnt enough, Ex: "morning", "afternoon"
-		shift: {
-			type: String,
-			enum: ['morning', 'afternoon', 'evening', 'full_day'],
-			required: true
-		},
-		room: {
+		educationalSegment: {
 			type: Schema.Types.ObjectId,
-			ref: "Room",
-		},
-		// Principal teacher responsible for the class
-		teacherResponsible: {
-			type: Schema.Types.ObjectId,
-			ref: "Users",
-		},
-		startDate: {
-			type: Date,
-			required: [true, "Please add a start date"],
-		},
-		endDate: {
-			type: Date,
-			required: [true, "Please add an end date"],
-		},
-		capacity: {
-			type: Number,
-			required: [true, "Please add a max capacity"],
+			ref: "EducationalSegment",
+			required: true,
 		},
 		// Not required, override for Year Level Grade
 		subjects: [{
 			type: Schema.Types.ObjectId,
 			ref: 'Subject'
 		}],
+		room: {
+			type: Schema.Types.ObjectId,
+			ref: "Room",
+		},
+		capacity: {
+			type: Number,
+			required: [true, "Please add a max capacity"],
+		},
+		schedule: [
+			{
+			  dayOfWeek: {
+				type: String,
+				enum: ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'],
+				required: true,
+			  },
+			  startTime: {
+				type: String,
+				required: true,
+			  },
+			  endTime: {
+				type: String,
+				required: true,
+			  },
+			  subject: {
+				type: Schema.Types.ObjectId,
+				ref: "Subjects",
+			  },
+			  teacher: {
+				type: Schema.Types.ObjectId,
+				ref: "Users",
+			  },
+			},
+		  ],
+		shift: {
+			type: String,
+			enum: ['morning', 'afternoon', 'evening', 'full_day'],
+			required: true
+		},
+		// Principal teacher responsible for the class
+		// teacherResponsible: {
+		// 	type: Schema.Types.ObjectId,
+		// 	ref: "Users",
+		// },
+		// startDate: {
+		// 	type: Date,
+		// 	required: [true, "Please add a start date"],
+		// },
+		// endDate: {
+		// 	type: Date,
+		// 	required: [true, "Please add an end date"],
+		// },
 		status: {
 			type: String,
 			enum: ['active', 'disabled', 'archived'],

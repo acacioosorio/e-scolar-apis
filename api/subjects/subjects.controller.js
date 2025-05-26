@@ -87,10 +87,10 @@ exports.listSubjects = async (req, res, next) => {
 					select: 'name yearLevel academicYear',
 					populate: [
 						{ path: 'yearLevel', select: 'name order' },
-						{ path: 'academicYear', select: 'name startDate endDate' }
+						{ path: 'academicYear', select: 'title startDate endDate' }
 					]
 				})
-				.populate('employees', 'firstName lastName email')
+				.populate('employees', 'firstName lastName email photo')
 				.sort({ [sortBy]: order })
 				.skip(skip)
 				.limit(limit)
@@ -129,7 +129,7 @@ exports.getSubject = async (req, res, next) => {
 				select: 'name yearLevel academicYear',
 				populate: [
 					{ path: 'yearLevel', select: 'name order' },
-					{ path: 'academicYear', select: 'name startDate endDate' }
+					{ path: 'academicYear', select: 'title startDate endDate' }
 				]
 			})
 			.populate('employees', 'firstName lastName email')
